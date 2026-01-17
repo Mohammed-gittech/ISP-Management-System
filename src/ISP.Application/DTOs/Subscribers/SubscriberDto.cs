@@ -1,4 +1,6 @@
 
+using ISP.Application.DTOs.Subscriptions;
+
 namespace ISP.Application.DTOs.Subscribers
 {
     public class SubscriberDto
