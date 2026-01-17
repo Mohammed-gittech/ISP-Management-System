@@ -1,0 +1,40 @@
+# Build results
+bin/
+obj/
+out/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+
+# Rider
+.idea/
+
+# NuGet Packages
+*.nupkg
+packages/
+.nuget/
+
+# Entity Framework
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+logs/
+
+# Secrets (مهم جداً!)
+appsettings.Development.json
+appsettings.Production.json
+**/appsettings.*.json
+!**/appsettings.json
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

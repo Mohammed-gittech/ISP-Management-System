@@ -1,0 +1,6 @@
+@ISP.API_HostAddress = http://localhost:5029
+
+GET {{ISP.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
