@@ -1,4 +1,6 @@
+using ISP.Domain.Interfaces;
 using ISP.Infrastructure.Data;
+using ISP.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,6 +15,12 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
         b => b.MigrationsAssembly("ISP.Infrastructure") //مهم!
     )
 );
+
+// ============================================
+// Repository & Unit of Work
+// ============================================
+builder.Services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
