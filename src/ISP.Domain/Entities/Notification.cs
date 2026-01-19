@@ -18,7 +18,7 @@ namespace ISP.Domain.Entities
 
         public NotificationChannel Channel { get; set; } = NotificationChannel.Telegram;
 
-        public DateTime? SentDat { get; set; }
+        public DateTime? SentDate { get; set; }
         public NotificationStatus Status { get; set; } = NotificationStatus.Pending;
 
         public string? ErrorMessage { get; set; }

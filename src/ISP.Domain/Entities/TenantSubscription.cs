@@ -18,7 +18,7 @@ namespace ISP.Domain.Entities
 
         public TenantSubscriptionStatus Status { get; set; } = TenantSubscriptionStatus.Active;
 
-        public string? PymentMethod { get; set; }
+        public string? PaymentMethod { get; set; }
         public DateTime? LastPaymentDate { get; set; }
 
     }
