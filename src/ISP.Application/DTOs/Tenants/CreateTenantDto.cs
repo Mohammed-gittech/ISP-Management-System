@@ -15,7 +15,7 @@ namespace ISP.Application.DTOs.Tenants
 
 
         // Admin User Details
-        public string AdminUserName { get; set; } = string.Empty;
+        public string AdminUsername { get; set; } = string.Empty;
         public string AdminEmail { get; set; } = string.Empty;
         public string AdminPassword { get; set; } = string.Empty;
     }

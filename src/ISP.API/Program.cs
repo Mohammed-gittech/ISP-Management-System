@@ -1,9 +1,14 @@
+using System.Text;
 using ISP.Application.Interfaces;
 using ISP.Domain.Interfaces;
+using ISP.Infrastructure;
 using ISP.Infrastructure.Data;
+using ISP.Infrastructure.Identity;
 using ISP.Infrastructure.Repositories;
 using ISP.Infrastructure.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +37,38 @@ builder.Services.AddScoped<ISubscriberService, SubscriberService>();
 builder.Services.AddScoped<IPlanService, PlanService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 
+// ============================================
+// Authentication & JWT
+// ============================================
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
+            ValidateIssuer = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidateAudience = true,
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+// ============================================
+// Identity Services
+// ============================================
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
+
+// ============================================
+// Business Services
+// ============================================
+builder.Services.AddScoped<ITenantService, TenantService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -47,7 +84,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
+app.UseAuthentication(); // ← قبل Authorization
 app.UseAuthorization();
 
 app.MapControllers();

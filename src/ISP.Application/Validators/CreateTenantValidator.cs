@@ -22,7 +22,7 @@ namespace ISP.Application.Validators
             RuleFor(x => x.ContactPhone)
                 .MaximumLength(20).When(x => !string.IsNullOrEmpty(x.ContactPhone));
 
-            RuleFor(x => x.AdminUserName)
+            RuleFor(x => x.AdminUsername)
                 .NotEmpty().WithMessage("اسم مستخدم المسؤول مطلوب")
                 .MaximumLength(3).WithMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل")
                 .MaximumLength(50);
