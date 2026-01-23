@@ -1,4 +1,5 @@
 using System.Text;
+using ISP.API.Middleware;
 using ISP.Application.Interfaces;
 using ISP.Domain.Interfaces;
 using ISP.Infrastructure;
@@ -76,6 +77,8 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+app.UseExceptionHandling();
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -84,7 +87,12 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
 app.UseAuthentication(); // ← قبل Authorization
+
+// 5. Tenant Resolver (بعد Authentication)
+app.UseTenantResolver();
+
 app.UseAuthorization();
 
 app.MapControllers();

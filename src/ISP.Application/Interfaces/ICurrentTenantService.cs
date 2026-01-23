@@ -6,5 +6,6 @@ namespace ISP.Application.Interfaces
         int TenantId { get; }
         bool IsSuperAdmin { get; }
         void SetTenant(int tenantId);
+        void SetSuperAdmin();
     }
 }
