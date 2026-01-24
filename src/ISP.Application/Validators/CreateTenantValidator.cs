@@ -24,7 +24,7 @@ namespace ISP.Application.Validators
 
             RuleFor(x => x.AdminUsername)
                 .NotEmpty().WithMessage("اسم مستخدم المسؤول مطلوب")
-                .MaximumLength(3).WithMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل")
+                .MinimumLength(3).WithMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل")
                 .MaximumLength(50);
 
             RuleFor(x => x.AdminEmail)

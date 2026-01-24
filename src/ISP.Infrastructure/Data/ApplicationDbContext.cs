@@ -1,4 +1,5 @@
 
+using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,9 +15,14 @@ namespace ISP.Infrastructure.Data
         /// Constructor - يستقبل Options من DI Container
         /// Options تحتوي على Connection String
         /// </summary>
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
-        {
 
+        private readonly ICurrentTenantService? _currentTenant;
+        public ApplicationDbContext(
+        DbContextOptions<ApplicationDbContext> options,
+        ICurrentTenantService currentTenant)
+         : base(options)
+        {
+            _currentTenant = currentTenant;
         }
 
         // ============================================
@@ -81,9 +87,9 @@ namespace ISP.Infrastructure.Data
             // ============================================
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
 
-            // ملاحظة: Query Filters سنضيفها لاحقاً
-            // بعد ما نعمل CurrentTenantService
-            // ToDo: Query Filters for Multi-Tenancy
+            // Query Filters لا تُضاف هنا!
+            // سنضيفها بطريقة مختلفة لاحقاً (Phase 2)
+            // Todo: إضافة Query Filters للـ Multi-Tenancy
         }
     }
 }
