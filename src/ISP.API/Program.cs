@@ -1,16 +1,21 @@
 using System.Text;
 using FluentValidation;
 using FluentValidation.AspNetCore;
+using Hangfire;
+using Hangfire.SqlServer;
 using ISP.API.Middleware;
 using ISP.Application.Interfaces;
 using ISP.Application.Mappings;
 using ISP.Application.Validators;
 using ISP.Domain.Interfaces;
 using ISP.Infrastructure;
+using ISP.Infrastructure.BackgroundJobs;
 using ISP.Infrastructure.Data;
 using ISP.Infrastructure.Identity;
 using ISP.Infrastructure.Repositories;
 using ISP.Infrastructure.Services;
+using ISP.Infrastructure.Services.Notifications;
+using ISP.Infrastructure.Services.Telegram;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -28,6 +33,30 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
         b => b.MigrationsAssembly("ISP.Infrastructure") //مهم!
     )
 );
+
+// ============================================
+// Hangfire Configuration
+// ============================================
+builder.Services.AddHangfire(config =>
+{
+    config
+        .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+        .UseSimpleAssemblyNameTypeSerializer()
+        .UseRecommendedSerializerSettings()
+        .UseSqlServerStorage(
+            builder.Configuration.GetConnectionString("HangfireConnection"),
+            new SqlServerStorageOptions
+            {
+                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+                SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
+                QueuePollInterval = TimeSpan.Zero,
+                UseRecommendedIsolationLevel = true,
+                DisableGlobalLocks = true
+            });
+});
+
+// Add Hangfire Server
+builder.Services.AddHangfireServer();
 
 // ============================================
 // Authentication & JWT
@@ -89,6 +118,18 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ISubscriberService, SubscriberService>();
 builder.Services.AddScoped<IPlanService, PlanService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
+
+// ============================================
+// Phase 2: Telegram & Notification Services
+// ============================================
+builder.Services.AddScoped<ITelegramService, TelegramService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+
+// ============================================
+// Phase 2: Background Jobs
+// ============================================
+builder.Services.AddScoped<NotificationJob>();
+builder.Services.AddScoped<SubscriptionStatusJob>();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -185,6 +226,94 @@ app.UseTenantResolver();
 
 app.UseAuthorization();
 
+// ============================================
+// Hangfire Dashboard
+// ============================================
+app.UseHangfireDashboard("/hangfire", new DashboardOptions
+{
+    // ⚠️ للتطوير فقط - في Production استخدم Authorization
+    Authorization = new[] { new HangfireAuthorizationFilter() }
+});
+// ============================================
+// Schedule Background Jobs
+// ============================================
+ConfigureBackgroundJobs(app.Services);
+
 app.MapControllers();
 
 app.Run();
+
+// ============================================
+// Background Jobs Configuration
+// ============================================
+void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
+{
+    using var scope = serviceProvider.CreateScope();
+    var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+    // الحصول على Cron Schedules من appsettings.json
+    var expiryCheckCron = config["BackgroundJobs:ExpiryCheckCron"] ?? "0 1 * * *";
+    var retryFailedCron = config["BackgroundJobs:RetryFailedCron"] ?? "0 */6 * * *";
+    var statusUpdateCron = config["BackgroundJobs:StatusUpdateCron"] ?? "0 2 * * *";
+
+    // Job 1: فحص وإرسال تنبيهات انتهاء الاشتراك (Daily at 1 AM)
+    RecurringJob.AddOrUpdate<NotificationJob>(
+        "send-expiry-notifications",
+        job => job.SendExpiryNotificationsAsync(),
+        expiryCheckCron,
+        TimeZoneInfo.Utc
+    );
+
+    // Job 2: إعادة محاولة الإشعارات الفاشلة (Every 6 hours)
+    RecurringJob.AddOrUpdate<NotificationJob>(
+        "retry-failed-notifications",
+        job => job.RetryFailedNotificationsAsync(),
+        retryFailedCron,
+        TimeZoneInfo.Utc
+    );
+
+    // Job 3: تحديث حالات الاشتراكات (Daily at 2 AM)
+    RecurringJob.AddOrUpdate<SubscriptionStatusJob>(
+        "update-subscription-statuses",
+        job => job.UpdateSubscriptionStatusesAsync(),
+        statusUpdateCron,
+        TimeZoneInfo.Utc
+    );
+
+    // Job 4: إرسال تنبيهات الاشتراكات المنتهية (Daily at 3 AM)
+    RecurringJob.AddOrUpdate<NotificationJob>(
+        "send-expired-notifications",
+        job => job.SendExpiredNotificationsAsync(),
+        "0 3 * * *",
+        TimeZoneInfo.Utc
+    );
+
+    // Job 5 (Optional): تنظيف الإشعارات القديمة (Weekly on Sunday at 4 AM)
+    RecurringJob.AddOrUpdate<SubscriptionStatusJob>(
+        "cleanup-old-notifications",
+        job => job.CleanupOldNotificationsAsync(),
+        "0 4 * * 0", // Every Sunday at 4 AM
+        TimeZoneInfo.Utc
+    );
+
+    // Job 6 (Optional): إحصائيات يومية (Daily at 5 AM)
+    RecurringJob.AddOrUpdate<SubscriptionStatusJob>(
+        "generate-daily-statistics",
+        job => job.GenerateDailyStatisticsAsync(),
+        "0 5 * * *",
+        TimeZoneInfo.Utc
+    );
+}
+
+// ============================================
+// Hangfire Authorization Filter (للتطوير)
+// ============================================
+public class HangfireAuthorizationFilter : Hangfire.Dashboard.IDashboardAuthorizationFilter
+{
+    public bool Authorize(Hangfire.Dashboard.DashboardContext context)
+    {
+        // ⚠️ للتطوير فقط - يسمح للجميع
+        // في Production: تحقق من Authentication
+        return true;
+    }
+}
