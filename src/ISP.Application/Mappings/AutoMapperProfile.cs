@@ -4,6 +4,7 @@ using ISP.Application.DTOs.Plans;
 using ISP.Application.DTOs.Subscribers;
 using ISP.Application.DTOs.Subscriptions;
 using ISP.Application.DTOs.Tenants;
+using ISP.Application.DTOs.Users;
 using ISP.Domain.Entities;
 
 namespace ISP.Application.Mappings
@@ -75,6 +76,16 @@ namespace ISP.Application.Mappings
             CreateMap<User, LoginResponseDto>()
                 .ForMember(dest => dest.Role, opt => opt.MapFrom(src => src.Role.ToString()))
                 .ForMember(dest => dest.TenantName, opt => opt.MapFrom(src => src.Tenant != null ? src.Tenant.Name : null));
+
+            // Users Mapping
+            CreateMap<User, UserDto>()
+                .ForMember(dest => dest.Role, opt => opt.MapFrom(src => src.Role.ToString()))
+                .ForMember(dest => dest.TenantName, opt => opt.Ignore()); // سنملأها يدويًا
+
+            CreateMap<CreateUserDto, User>();
+
+            CreateMap<UpdateUserDto, User>()
+                .ForAllMembers(opts => opts.Condition((src, dest, srcMember) => srcMember != null));
         }
     }
 }
