@@ -21,6 +21,7 @@ namespace ISP.Infrastructure.Repositories
         private IRepository<Plan>? _plans;
         private IRepository<Subscription>? _subscriptions;
         private IRepository<Notification>? _notifications;
+        private IRepository<AuditLog>? _auditLogs;
 
         public UnitOfWork(ApplicationDbContext context)
         {
@@ -95,6 +96,15 @@ namespace ISP.Infrastructure.Repositories
             {
                 _notifications ??= new GenericRepository<Notification>(_context);
                 return _notifications;
+            }
+        }
+
+        public IRepository<AuditLog> AuditLogs
+        {
+            get
+            {
+                _auditLogs ??= new GenericRepository<AuditLog>(_context);
+                return _auditLogs;
             }
         }
 

@@ -141,6 +141,16 @@ builder.Services.AddScoped<SubscriptionStatusJob>();
 // ============================================
 builder.Services.AddScoped<IUserService, UserService>();
 
+// ============================================
+// Phase 3: Audit Log Service
+// ============================================
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+
+// ============================================
+// HttpContextAccessor (مطلوب للـ IP Address)
+// ============================================
+builder.Services.AddHttpContextAccessor();
+
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -234,6 +244,11 @@ app.UseAuthentication(); // ← قبل Authorization
 // 5. Tenant Resolver (بعد Authentication)
 app.UseTenantResolver();
 
+// ============================================
+// Phase 3: Audit Logging Middleware
+// ============================================
+app.UseAuditLogging();
+
 app.UseAuthorization();
 
 // ============================================
@@ -271,7 +286,10 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
         "send-expiry-notifications",
         job => job.SendExpiryNotificationsAsync(),
         expiryCheckCron,
-        TimeZoneInfo.Utc
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Utc
+        }
     );
 
     // Job 2: إعادة محاولة الإشعارات الفاشلة (Every 6 hours)
@@ -279,7 +297,10 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
         "retry-failed-notifications",
         job => job.RetryFailedNotificationsAsync(),
         retryFailedCron,
-        TimeZoneInfo.Utc
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Utc
+        }
     );
 
     // Job 3: تحديث حالات الاشتراكات (Daily at 2 AM)
@@ -287,7 +308,10 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
         "update-subscription-statuses",
         job => job.UpdateSubscriptionStatusesAsync(),
         statusUpdateCron,
-        TimeZoneInfo.Utc
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Utc
+        }
     );
 
     // Job 4: إرسال تنبيهات الاشتراكات المنتهية (Daily at 3 AM)
@@ -295,7 +319,10 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
         "send-expired-notifications",
         job => job.SendExpiredNotificationsAsync(),
         "0 3 * * *",
-        TimeZoneInfo.Utc
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Utc
+        }
     );
 
     // Job 5 (Optional): تنظيف الإشعارات القديمة (Weekly on Sunday at 4 AM)
@@ -303,7 +330,10 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
         "cleanup-old-notifications",
         job => job.CleanupOldNotificationsAsync(),
         "0 4 * * 0", // Every Sunday at 4 AM
-        TimeZoneInfo.Utc
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Utc
+        }
     );
 
     // Job 6 (Optional): إحصائيات يومية (Daily at 5 AM)
@@ -311,7 +341,10 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
         "generate-daily-statistics",
         job => job.GenerateDailyStatisticsAsync(),
         "0 5 * * *",
-        TimeZoneInfo.Utc
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Utc
+        }
     );
 }
 

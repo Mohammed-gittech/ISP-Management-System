@@ -12,7 +12,7 @@ namespace ISP.Domain.Interfaces
         IRepository<Plan> Plans { get; }
         IRepository<Subscription> Subscriptions { get; }
         IRepository<Notification> Notifications { get; }
-
+        IRepository<AuditLog> AuditLogs { get; }
         Task<int> SaveChangesAsync();
     }
 }

@@ -1,4 +1,6 @@
 using ISP.Application.Interfaces;
+using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 
 namespace ISP.Infrastructure.Services
 {
@@ -7,53 +9,70 @@ namespace ISP.Infrastructure.Services
     /// </summary>
     public class CurrentTenantService : ICurrentTenantService
     {
+        private readonly IHttpContextAccessor _httpContextAccessor;
         private int? _tenantId;
         private bool? _isSuperAdmin;
 
+        public CurrentTenantService(IHttpContextAccessor httpContextAccessor)
+        {
+            _httpContextAccessor = httpContextAccessor;
+        }
+
         /// <summary>
         /// TenantId الحالي
-        /// يُستخرج من JWT Token في Middleware
         /// </summary>
         public int TenantId
         {
             get
             {
                 if (_tenantId == null)
-                    throw new InvalidOperationException("Tenant context not set. User must be authenticated.");
-
+                    throw new InvalidOperationException("Tenant context not set.");
                 return _tenantId.Value;
             }
         }
 
         /// <summary>
-        /// هل المستخدم الحالي SuperAdmin؟
-        /// SuperAdmin يرى كل الوكلاء
+        /// هل المستخدم SuperAdmin؟
         /// </summary>
-        public bool IsSuperAdmin
+        public bool IsSuperAdmin => _isSuperAdmin ?? false;
+
+        /// <summary>
+        /// UserId الحالي (من JWT)
+        /// </summary>
+        public int? UserId
         {
-            get => _isSuperAdmin ?? false;
+            get
+            {
+                var claim = _httpContextAccessor.HttpContext?.User
+                    .FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                return string.IsNullOrEmpty(claim) ? null : int.Parse(claim);
+            }
         }
 
         /// <summary>
-        /// تعيين TenantId
-        /// يُستدعى من Middleware بعد قراءة JWT
+        /// Username الحالي (من JWT)
         /// </summary>
+        public string? Username
+        {
+            get
+            {
+                return _httpContextAccessor.HttpContext?.User
+                    .FindFirst(ClaimTypes.Name)?.Value;
+            }
+        }
+
         public void SetTenant(int tenantId)
         {
             if (_tenantId != null)
-                throw new InvalidOperationException("Tenant already set for this request.");
-
+                throw new InvalidOperationException("Tenant already set.");
             _tenantId = tenantId;
             _isSuperAdmin = false;
         }
 
-        /// <summary>
-        /// تعيين SuperAdmin mode
-        /// </summary>
         public void SetSuperAdmin()
         {
             _isSuperAdmin = true;
-            _tenantId = null; // SuperAdmin لا TenantId له
+            _tenantId = null;
         }
     }
 }

@@ -1,4 +1,5 @@
 using AutoMapper;
+using ISP.Application.DTOs.AuditLogs;
 using ISP.Application.DTOs.Auth;
 using ISP.Application.DTOs.Plans;
 using ISP.Application.DTOs.Subscribers;
@@ -86,6 +87,10 @@ namespace ISP.Application.Mappings
 
             CreateMap<UpdateUserDto, User>()
                 .ForAllMembers(opts => opts.Condition((src, dest, srcMember) => srcMember != null));
+
+            // AuditLog Mapping
+            CreateMap<AuditLog, AuditLogDto>()
+                .ForMember(dest => dest.TenantName, opt => opt.Ignore());
         }
     }
 }

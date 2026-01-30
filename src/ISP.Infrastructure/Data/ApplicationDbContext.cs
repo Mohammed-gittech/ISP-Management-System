@@ -1,6 +1,7 @@
 
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
+using ISP.Infrastructure.Data.Configurations;
 using Microsoft.EntityFrameworkCore;
 
 namespace ISP.Infrastructure.Data
@@ -66,6 +67,11 @@ namespace ISP.Infrastructure.Data
         /// </summary>
         public DbSet<Notification> Notifications => Set<Notification>();
 
+        /// <summary>
+        /// جدول AuditLogs (سجلات العمليات)
+        /// </summary>
+        public DbSet<AuditLog> AuditLogs { get; set; }
+
         // ============================================
         // OnModelCreating - يُستدعى عند بناء Model
         // هنا نطبق Fluent API Configurations
@@ -86,6 +92,8 @@ namespace ISP.Infrastructure.Data
             // في نفس Assembly
             // ============================================
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+
+            // modelBuilder.ApplyConfiguration(new AuditLogConfiguration());
 
             // Query Filters لا تُضاف هنا!
             // سنضيفها بطريقة مختلفة لاحقاً (Phase 2)
