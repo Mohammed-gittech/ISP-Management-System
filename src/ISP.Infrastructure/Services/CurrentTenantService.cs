@@ -74,5 +74,8 @@ namespace ISP.Infrastructure.Services
             _isSuperAdmin = true;
             _tenantId = null;
         }
+
+        // Todo Remov if it dont work
+        public bool HasTenant => _tenantId != null;
     }
 }

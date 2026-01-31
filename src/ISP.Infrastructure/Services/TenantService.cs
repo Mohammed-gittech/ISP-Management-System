@@ -33,8 +33,8 @@ namespace ISP.Infrastructure
         public async Task<TenantDto> CreateAsync(CreateTenantDto dto)
         {
             // 1. التحقق من عدم وجود Email مكرر
-            var allTenants = await _unitOfWork.Tenants.GetAllAsync();
-            if (allTenants.Any(t => t.ContactEmail == dto.ContactEmail))
+            var existingTenants = await _unitOfWork.Tenants.GetAllAsync(t => t.ContactEmail == dto.ContactEmail);
+            if (existingTenants.Any())
             {
                 throw new InvalidOperationException("البريد الإلكتروني موجود مسبقاً");
             }
@@ -175,8 +175,7 @@ namespace ISP.Infrastructure
 
         public async Task<int> GetCurrentSubscribersCountAsync(int tenantId)
         {
-            var allSubscribers = await _unitOfWork.Subscribers.GetAllAsync();
-            return allSubscribers.Count(s => s.TenantId == tenantId);
+            return await _unitOfWork.Subscribers.CountAsync(s => s.TenantId == tenantId);
         }
 
         public async Task<bool> CanAddSubscriberAsync(int tenantId)

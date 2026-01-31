@@ -64,11 +64,7 @@ namespace ISP.Infrastructure.Services
         public async Task<SubscriberDto?> GetByIdAsync(int id)
         {
             var subscriber = await _unitOfWork.Subscribers.GetByIdAsync(id);
-
-            if (subscriber == null)
-                return null;
-
-            return _mapper.Map<SubscriberDto>(subscriber);
+            return subscriber == null ? null : _mapper.Map<SubscriberDto>(subscriber);
         }
 
         /// <summary>
@@ -103,13 +99,9 @@ namespace ISP.Infrastructure.Services
             int pageNumber = 1,
             int pageSize = 10)
         {
-            var allSubscribers = await _unitOfWork.Subscribers.GetAllAsync();
-
             // البحث في الاسم أو رقم الهاتف
-            var filtered = allSubscribers
-                .Where(s => s.FullName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                s.PhoneNumber.Contains(searchTerm))
-                .ToList();
+            var filtered = await _unitOfWork.Subscribers.GetAllAsync(s =>
+                s.FullName.Contains(searchTerm) || s.PhoneNumber.Contains(searchTerm));
 
             var totalCount = filtered.Count();
             var items = filtered
@@ -208,12 +200,12 @@ namespace ISP.Infrastructure.Services
         /// </summary>
         public async Task<bool> PhoneNumberExistsAsync(string phoneNumber, int? excludeId = null)
         {
-            var allSubscribers = await _unitOfWork.Subscribers.GetAllAsync();
+            var subscribers = await _unitOfWork.Subscribers.GetAllAsync(s => s.PhoneNumber == phoneNumber);
 
-            return allSubscribers.Any(s =>
-                s.PhoneNumber == phoneNumber &&
-                s.Id != excludeId
-            );
+            if (excludeId.HasValue)
+                subscribers = subscribers.Where(s => s.Id != excludeId.Value);
+
+            return subscribers.Any();
         }
 
         /// <summary>

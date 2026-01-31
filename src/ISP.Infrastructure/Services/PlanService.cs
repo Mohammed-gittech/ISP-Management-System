@@ -46,10 +46,9 @@ namespace ISP.Infrastructure.Services
 
         public async Task<List<PlanDto>> GetActiveAsync()
         {
-            var allPlans = await _unitOfWork.Plans.GetAllAsync();
-            var activePlans = allPlans.Where(p => p.IsActive).ToList();
+            var activePlans = await _unitOfWork.Plans.GetAllAsync(p => p.IsActive);
 
-            return _mapper.Map<List<PlanDto>>(activePlans);
+            return _mapper.Map<List<PlanDto>>(activePlans.ToList());
         }
 
         public async Task<PagedResultDto<PlanDto>> GetAllAsync(int pageNumber = 1, int pageSize = 10)

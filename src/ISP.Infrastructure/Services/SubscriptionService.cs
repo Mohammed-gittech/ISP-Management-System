@@ -109,13 +109,11 @@ namespace ISP.Infrastructure.Services
 
         public async Task<SubscriptionDto?> GetCurrentBySubscriberIdAsync(int subscriberId)
         {
-            var allSubscriptions = await _unitOfWork.Subscriptions.GetAllAsync();
+            var subscriptions = await _unitOfWork.Subscriptions.GetAllAsync(s =>
+                s.SubscriberId == subscriberId &&
+                (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Expiring));
 
-            var current = allSubscriptions
-                .Where(s => s.SubscriberId == subscriberId)
-                .Where(s => s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Expiring)
-                .OrderByDescending(s => s.CreatedAt)
-                .FirstOrDefault();
+            var current = subscriptions.OrderByDescending(s => s.CreatedAt).FirstOrDefault();
 
             return current == null ? null : _mapper.Map<SubscriptionDto>(current);
         }
@@ -142,17 +140,15 @@ namespace ISP.Infrastructure.Services
 
         public async Task<PagedResultDto<SubscriptionDto>> GetExpiringAsync(int days, int pageNumber = 1, int pageSize = 10)
         {
-            var allSubscriptions = await _unitOfWork.Subscriptions.GetAllAsync();
-
             var expiringDate = DateTime.UtcNow.AddDays(days);
 
-            var expiring = allSubscriptions
-                .Where(s => s.EndDate.Date <= expiringDate.Date && s.EndDate.Date >= DateTime.UtcNow.Date)
-                .OrderBy(s => s.EndDate)
-                .ToList();
+            var expiring = await _unitOfWork.Subscriptions.GetAllAsync(s =>
+                s.EndDate.Date <= expiringDate.Date && s.EndDate.Date >= DateTime.UtcNow.Date);
 
-            var totalCount = expiring.Count;
-            var items = expiring
+            var sorted = expiring.OrderBy(s => s.EndDate).ToList();
+
+            var totalCount = sorted.Count;
+            var items = sorted
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .ToList();
@@ -168,15 +164,12 @@ namespace ISP.Infrastructure.Services
 
         public async Task<PagedResultDto<SubscriptionDto>> GetExpiredAsync(int pageNumber = 1, int pageSize = 10)
         {
-            var allSubscriptions = await _unitOfWork.Subscriptions.GetAllAsync();
+            var expired = await _unitOfWork.Subscriptions.GetAllAsync(s => s.Status == SubscriptionStatus.Expired);
 
-            var expired = allSubscriptions
-                .Where(s => s.Status == SubscriptionStatus.Expired)
-                .OrderByDescending(s => s.EndDate)
-                .ToList();
+            var sorted = expired.OrderByDescending(s => s.EndDate).ToList();
 
-            var totalCount = expired.Count;
-            var items = expired
+            var totalCount = sorted.Count;
+            var items = sorted
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .ToList();

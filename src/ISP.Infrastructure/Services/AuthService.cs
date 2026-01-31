@@ -29,8 +29,8 @@ namespace ISP.Infrastructure.Services
         public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request)
         {
             // 1. البحث عن المستخدم بالـ Email
-            var allUsers = await _unitOfWork.Users.GetAllAsync();
-            var user = allUsers.FirstOrDefault(u => u.Email == request.Email);
+            var users = await _unitOfWork.Users.GetAllAsync(u => u.Email == request.Email);
+            var user = users.FirstOrDefault();
 
             if (user == null)
                 return null;

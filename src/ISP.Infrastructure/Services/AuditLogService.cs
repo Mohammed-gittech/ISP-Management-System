@@ -184,10 +184,9 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<PagedResultDto<AuditLogDto>> GetByTenantAsync(int tenantId, int pageNumber = 1, int pageSize = 10)
         {
-            var allLogs = await _unitOfWork.AuditLogs.GetAllAsync();
-            var tenantLogs = allLogs.Where(a => a.TenantId == tenantId).ToList();
+            var tenantLogs = await _unitOfWork.AuditLogs.GetByTenantAsync(tenantId);
 
-            var totalCount = tenantLogs.Count;
+            var totalCount = tenantLogs.Count();
 
             var logs = tenantLogs
                 .OrderByDescending(a => a.Timestamp)
@@ -211,10 +210,9 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<PagedResultDto<AuditLogDto>> GetByUserAsync(int userId, int pageNumber = 1, int pageSize = 10)
         {
-            var allLogs = await _unitOfWork.AuditLogs.GetAllAsync();
-            var userLogs = allLogs.Where(a => a.UserId == userId).ToList();
+            var userLogs = await _unitOfWork.AuditLogs.GetAllAsync(a => a.UserId == userId);
 
-            var totalCount = userLogs.Count;
+            var totalCount = userLogs.Count();
 
             var logs = userLogs
                 .OrderByDescending(a => a.Timestamp)
@@ -238,12 +236,10 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<PagedResultDto<AuditLogDto>> GetByEntityAsync(string entityType, int entityId, int pageNumber = 1, int pageSize = 10)
         {
-            var allLogs = await _unitOfWork.AuditLogs.GetAllAsync();
-            var entityLogs = allLogs
-                .Where(a => a.EntityType == entityType && a.EntityId == entityId)
-                .ToList();
+            var entityLogs = await _unitOfWork.AuditLogs.GetAllAsync(a =>
+                a.EntityType == entityType && a.EntityId == entityId);
 
-            var totalCount = entityLogs.Count;
+            var totalCount = entityLogs.Count();
 
             var logs = entityLogs
                 .OrderByDescending(a => a.Timestamp)
@@ -269,8 +265,7 @@ namespace ISP.Infrastructure.Services
         {
             var cutoffDate = DateTime.UtcNow.AddDays(-olderThanDays);
 
-            var allLogs = await _unitOfWork.AuditLogs.GetAllAsync();
-            var oldLogs = allLogs.Where(a => a.Timestamp < cutoffDate).ToList();
+            var oldLogs = await _unitOfWork.AuditLogs.GetAllAsync(a => a.Timestamp < cutoffDate);
 
             foreach (var log in oldLogs)
             {
@@ -279,9 +274,9 @@ namespace ISP.Infrastructure.Services
 
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Cleaned up {Count} audit logs older than {Days} days", oldLogs.Count, olderThanDays);
+            _logger.LogInformation("Cleaned up {Count} audit logs older than {Days} days", oldLogs.Count(), olderThanDays);
 
-            return oldLogs.Count;
+            return oldLogs.Count();
         }
 
     }

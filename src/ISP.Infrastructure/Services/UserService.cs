@@ -59,15 +59,17 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<PagedResultDto<UserDto>> GetAllAsync(int pageNumber = 1, int pageSize = 10, string? searchTerm = null)
         {
-            // 1. جلب جميع المستخدمين
-            var allUsers = await _unitOfWork.Users.GetAllAsync();
+            IEnumerable<User> allUsers;
 
             // 2. تطبيق البحث إذا وُجد
             if (!string.IsNullOrWhiteSpace(searchTerm))
             {
-                allUsers = allUsers.Where(u =>
-                    u.Username.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                    u.Email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)).ToList();
+                allUsers = await _unitOfWork.Users.GetAllAsync(u =>
+                    u.Username.Contains(searchTerm) || u.Email.Contains(searchTerm));
+            }
+            else
+            {
+                allUsers = await _unitOfWork.Users.GetAllAsync();
             }
 
             // 3. حساب الإجمالي
@@ -270,13 +272,10 @@ namespace ISP.Infrastructure.Services
         public async Task<PagedResultDto<UserDto>> GetUsersByTenantAsync(int tenantId, int pageNumber, int pageSize)
         {
             // 1. جلب جميع المستخدمين
-            var allUsers = await _unitOfWork.Users.GetAllAsync();
-
             // 2. تصفية حسب TenantId
-            var tenantUsers = allUsers.Where(u => u.TenantId == tenantId).ToList();
-
+            var tenantUsers = await _unitOfWork.Users.GetByTenantAsync(tenantId);
             // 3. حساب الإجمالي
-            var totalCount = tenantUsers.Count;
+            var totalCount = tenantUsers.Count();
 
             // 4. تطبيق Pagination
             var users = tenantUsers
@@ -302,26 +301,22 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<bool> IsEmailUniqueAsync(string email, int? excludeUserId = null)
         {
-            var allUsers = await _unitOfWork.Users.GetAllAsync();
-
-            var query = allUsers.Where(u => u.Email == email);
+            var users = await _unitOfWork.Users.GetAllAsync(u => u.Email == email);
 
             if (excludeUserId.HasValue)
-                query = query.Where(u => u.Id != excludeUserId.Value);
+                users = users.Where(u => u.Id != excludeUserId.Value);
 
-            return !query.Any();
+            return !users.Any();
         }
 
         public async Task<bool> IsUsernameUniqueAsync(string username, int? excludeUserId = null)
         {
-            var allUsers = await _unitOfWork.Users.GetAllAsync();
-
-            var query = allUsers.Where(u => u.Username == username);
+            var users = await _unitOfWork.Users.GetAllAsync(u => u.Username == username);
 
             if (excludeUserId.HasValue)
-                query = query.Where(u => u.Id != excludeUserId.Value);
+                users = users.Where(u => u.Id != excludeUserId.Value);
 
-            return !query.Any();
+            return !users.Any();
         }
     }
 }

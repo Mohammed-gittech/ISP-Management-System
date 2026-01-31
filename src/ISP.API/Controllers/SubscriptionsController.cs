@@ -7,6 +7,7 @@ namespace ISP.API.Controllers
 {
     /// <summary>
     /// Controller لإدارة الاشتراكات
+    /// ✅ Multi-Tenancy: Repository Filter يطبق تلقائياً
     /// </summary>
     [Authorize]
     [ApiController]
@@ -22,6 +23,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// الحصول على كل الاشتراكات
+        /// ✅ Repository Filter: يرجع اشتراكات Tenant الحالي فقط
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
@@ -37,6 +39,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// الحصول على اشتراك بالـ Id
+        /// ✅ Repository Filter: إذا كان من Tenant آخر يرجع null
         /// </summary>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
@@ -118,6 +121,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// إنشاء اشتراك جديد
+        /// ✅ Service: يعين TenantId تلقائياً
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateSubscriptionDto dto)
@@ -153,6 +157,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// إلغاء اشتراك
+        /// ✅ Repository Filter: GetByIdAsync يتحقق من Ownership
         /// </summary>
         [HttpPost("{id}/cancel")]
         public async Task<IActionResult> Cancel(int id)

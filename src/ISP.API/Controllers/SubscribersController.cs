@@ -38,6 +38,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// الحصول على مشترك بالـ Id
+        /// ✅ Repository Filter: إذا كان من Tenant آخر يرجع null
         /// </summary>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
@@ -62,6 +63,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// البحث عن مشتركين
+        /// ✅ Repository Filter: يبحث في مشتركي Tenant الحالي فقط
         /// </summary>
         [HttpGet("search")]
         public async Task<IActionResult> Search(
@@ -89,6 +91,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// إنشاء مشترك جديد
+        ///  ✅ Service: يعين TenantId تلقائياً من CurrentTenantService
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateSubscriberDto dto)
@@ -108,32 +111,57 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// تحديث مشترك
+        /// ✅ Repository Filter: GetByIdAsync يتحقق من Ownership
         /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateSubscriberDto dto)
         {
-            await _service.UpdateAsync(id, dto);
-
-            return Ok(new
+            try
             {
-                success = true,
-                message = "تم تحديث المشترك بنجاح"
-            });
+                await _service.UpdateAsync(id, dto);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "تم تحديث المشترك بنجاح"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+
         }
 
         /// <summary>
         /// حذف مشترك
+        /// ✅ Repository Filter: GetByIdAsync يتحقق من Ownership
         /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            await _service.DeleteAsync(id);
-
-            return Ok(new
+            try
             {
-                success = true,
-                message = "تم حذف المشترك بنجاح"
-            });
+                await _service.DeleteAsync(id);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "تم حذف المشترك بنجاح"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
         }
 
         /// <summary>

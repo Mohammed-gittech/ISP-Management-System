@@ -1,4 +1,3 @@
-using Azure;
 using ISP.Application.DTOs.Plans;
 using ISP.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -23,6 +22,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// الحصول على كل الباقات
+        ///  Repository Filter: يرجع باقات Tenant الحالي فقط
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] int Page = 1, [FromQuery] int pageSize = 10)
@@ -53,6 +53,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// الحصول على باقة بالـ Id
+        /// ✅ Repository Filter: إذا كانت من Tenant آخر يرجع null
         /// </summary>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
@@ -77,6 +78,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// إنشاء باقة جديدة
+        ///  ✅ Service: يعين TenantId تلقائياً
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreatePlanDto dto)
@@ -97,17 +99,31 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// تحديث باقة
+        /// ✅ Repository Filter: GetByIdAsync يتحقق من Ownership
         /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdatePlanDto dto)
         {
-            await _service.UpdateAsync(id, dto);
-
-            return Ok(new
+            try
             {
-                success = true,
-                message = "تم تحديث الباقة بنجاح"
-            });
+                await _service.UpdateAsync(id, dto);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "تم تحديث الباقة بنجاح"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+
+
         }
 
         /// <summary>

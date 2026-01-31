@@ -1,4 +1,5 @@
 
+using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Interfaces;
 using ISP.Infrastructure.Data;
@@ -12,8 +13,9 @@ namespace ISP.Infrastructure.Repositories
     public class UnitOfWork : IUnitOfWork, IDisposable
     {
         private readonly ApplicationDbContext _context;
+        private readonly ICurrentTenantService _currentTenantService;
 
-        // Lazy initialization للـ Repositories
+        // Lazy initialization
         private IRepository<Tenant>? _tenants;
         private IRepository<TenantSubscription>? _tenantSubscriptions;
         private IRepository<User>? _users;
@@ -23,9 +25,12 @@ namespace ISP.Infrastructure.Repositories
         private IRepository<Notification>? _notifications;
         private IRepository<AuditLog>? _auditLogs;
 
-        public UnitOfWork(ApplicationDbContext context)
+        public UnitOfWork(
+            ApplicationDbContext context,
+            ICurrentTenantService currentTenantService)
         {
             _context = context;
+            _currentTenantService = currentTenantService;
         }
 
         // ============================================
@@ -36,77 +41,29 @@ namespace ISP.Infrastructure.Repositories
         /// Tenants Repository
         /// Lazy: ينشأ عند أول استخدام فقط
         /// </summary>
-        public IRepository<Tenant> Tenants
-        {
-            get
-            {
-                _tenants ??= new GenericRepository<Tenant>(_context);
-                return _tenants;
-            }
-        }
+        public IRepository<Tenant> Tenants =>
+            _tenants ??= new GenericRepository<Tenant>(_context, _currentTenantService);
 
-        public IRepository<TenantSubscription> TenantSubscriptions
-        {
-            get
-            {
-                _tenantSubscriptions ??= new GenericRepository<TenantSubscription>(_context);
-                return _tenantSubscriptions;
-            }
-        }
+        public IRepository<TenantSubscription> TenantSubscriptions =>
+            _tenantSubscriptions ??= new GenericRepository<TenantSubscription>(_context, _currentTenantService);
 
-        public IRepository<User> Users
-        {
-            get
-            {
-                _users ??= new GenericRepository<User>(_context);
-                return _users;
-            }
-        }
+        public IRepository<User> Users =>
+            _users ??= new GenericRepository<User>(_context, _currentTenantService);
 
-        public IRepository<Subscriber> Subscribers
-        {
-            get
-            {
-                _subscribers ??= new GenericRepository<Subscriber>(_context);
-                return _subscribers;
-            }
-        }
+        public IRepository<Subscriber> Subscribers =>
+            _subscribers ??= new GenericRepository<Subscriber>(_context, _currentTenantService);
 
-        public IRepository<Plan> Plans
-        {
-            get
-            {
-                _plans ??= new GenericRepository<Plan>(_context);
-                return _plans;
-            }
-        }
+        public IRepository<Plan> Plans =>
+            _plans ??= new GenericRepository<Plan>(_context, _currentTenantService);
 
-        public IRepository<Subscription> Subscriptions
-        {
-            get
-            {
-                _subscriptions ??= new GenericRepository<Subscription>(_context);
-                return _subscriptions;
-            }
-        }
+        public IRepository<Subscription> Subscriptions =>
+            _subscriptions ??= new GenericRepository<Subscription>(_context, _currentTenantService);
 
-        public IRepository<Notification> Notifications
-        {
-            get
-            {
-                _notifications ??= new GenericRepository<Notification>(_context);
-                return _notifications;
-            }
-        }
+        public IRepository<Notification> Notifications =>
+            _notifications ??= new GenericRepository<Notification>(_context, _currentTenantService);
 
-        public IRepository<AuditLog> AuditLogs
-        {
-            get
-            {
-                _auditLogs ??= new GenericRepository<AuditLog>(_context);
-                return _auditLogs;
-            }
-        }
+        public IRepository<AuditLog> AuditLogs =>
+            _auditLogs ??= new GenericRepository<AuditLog>(_context, _currentTenantService);
 
         // ============================================
         // SaveChanges - Transaction

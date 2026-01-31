@@ -9,5 +9,8 @@ namespace ISP.Application.Interfaces
         string? Username { get; }
         void SetTenant(int tenantId);
         void SetSuperAdmin();
+
+        // Todo Remov if it dont work
+        bool HasTenant { get; }
     }
 }

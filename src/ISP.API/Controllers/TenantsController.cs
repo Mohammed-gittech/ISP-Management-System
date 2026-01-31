@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using ISP.Application.DTOs.Tenants;
 using ISP.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -63,6 +64,15 @@ namespace ISP.API.Controllers
         [Authorize]
         public async Task<IActionResult> GetById(int id)
         {
+            // ✅ Ownership Check: TenantAdmin يرى وكيله فقط
+            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            if (currentUserRole == "TenantAdmin")
+            {
+                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
+                if (id != currentTenantId)
+                    return Forbid();
+            }
+
             var result = await _service.GetByIdAsync(id);
 
             if (result == null)
@@ -85,9 +95,17 @@ namespace ISP.API.Controllers
         /// تحديث بيانات وكيل
         /// </summary>
         [HttpPut("{id}")]
-        [Authorize]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateTenantDto dto)
         {
+            // ✅ Ownership Check: TenantAdmin يعدل وكيله فقط
+            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            if (currentUserRole == "TenantAdmin")
+            {
+                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
+                if (id != currentTenantId)
+                    return Forbid();
+            }
             await _service.UpdateAsync(id, dto);
 
             return Ok(new
@@ -154,6 +172,15 @@ namespace ISP.API.Controllers
         [Authorize]
         public async Task<IActionResult> GetSubscribersCount(int id)
         {
+            // ✅ Ownership Check
+            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            if (currentUserRole == "TenantAdmin")
+            {
+                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
+                if (id != currentTenantId)
+                    return Forbid();
+            }
+
             var count = await _service.GetCurrentSubscribersCountAsync(id);
             var tenant = await _service.GetByIdAsync(id);
 
