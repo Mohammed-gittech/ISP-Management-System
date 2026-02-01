@@ -4,32 +4,38 @@ using ISP.Application.DTOs.Subscribers;
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace ISP.Infrastructure.Services
 {
+    /// <summary>
+    /// خدمة إدارة المشتركين
+    /// ✅ Soft Delete Support
+    /// ✅ Manual Cascade Delete لـ Subscriptions
+    /// </summary>
     public class SubscriberService : ISubscriberService
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
         private readonly ICurrentTenantService _currentTenant;
+        private readonly ILogger<SubscriberService> _logger;
 
         public SubscriberService(
-        IUnitOfWork unitOfWork,
-        IMapper mapper,
-        ICurrentTenantService currentTenant)
+            IUnitOfWork unitOfWork,
+            IMapper mapper,
+            ICurrentTenantService currentTenant,
+            ILogger<SubscriberService> logger)
         {
             _unitOfWork = unitOfWork;
             _mapper = mapper;
             _currentTenant = currentTenant;
+            _logger = logger;
         }
 
         // ============================================
         // Create
         // ============================================
 
-        /// <summary>
-        /// إنشاء مشترك جديد
-        /// </summary>
         public async Task<SubscriberDto> CreateAsync(CreateSubscriberDto dto)
         {
             // 1. Validation: التحقق من عدم وجود رقم هاتف مكرر
@@ -58,27 +64,21 @@ namespace ISP.Infrastructure.Services
         // Read
         // ============================================
 
-        /// <summary>
-        /// الحصول على مشترك بالـ Id
-        /// </summary>
         public async Task<SubscriberDto?> GetByIdAsync(int id)
         {
             var subscriber = await _unitOfWork.Subscribers.GetByIdAsync(id);
             return subscriber == null ? null : _mapper.Map<SubscriberDto>(subscriber);
         }
 
-        /// <summary>
-        /// الحصول على كل المشتركين (مع Pagination)
-        /// </summary>
         public async Task<PagedResultDto<SubscriberDto>> GetAllAsync(int pageNumber = 1, int pageSize = 10)
         {
-            // Note: Query Filter يطبق تلقائياً (TenantId)
+            // Repository Filter يطبق Multi-Tenancy + Soft Delete تلقائياً
             var allSubscribers = await _unitOfWork.Subscribers.GetAllAsync();
 
             // Pagination
             var totalCount = allSubscribers.Count();
             var items = allSubscribers
-                .Skip((pageNumber - 1) * pageNumber)
+                .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .ToList();
 
@@ -91,9 +91,6 @@ namespace ISP.Infrastructure.Services
             };
         }
 
-        /// <summary>
-        /// البحث عن مشتركين
-        /// </summary>
         public async Task<PagedResultDto<SubscriberDto>> SearchAsync(
             string searchTerm,
             int pageNumber = 1,
@@ -122,9 +119,6 @@ namespace ISP.Infrastructure.Services
         // Update
         // ============================================
 
-        /// <summary>
-        /// تحديث بيانات مشترك
-        /// </summary>
         public async Task UpdateAsync(int id, UpdateSubscriberDto dto)
         {
             // 1. الحصول على المشترك
@@ -169,11 +163,13 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // Delete
+        // SOFT DELETE (محدث)
         // ============================================
 
         /// <summary>
-        /// حذف مشترك
+        /// حذف ناعم للمشترك
+        /// ✅ يحذف Subscriptions المرتبطة يدوياً (Manual Cascade)
+        /// ✅ يحتفظ بالبيانات للاسترجاع
         /// </summary>
         public async Task DeleteAsync(int id)
         {
@@ -184,20 +180,136 @@ namespace ISP.Infrastructure.Services
                 throw new InvalidOperationException($"المشترك برقم {id} غير موجود");
             }
 
-            // TODO: التحقق من عدم وجود اشتراكات نشطة
-            // سنضيفها لاحقاً
+            _logger.LogInformation("Soft deleting Subscriber {SubscriberId}", id);
 
+            // ============================================
+            // MANUAL CASCADE: حذف Subscriptions المرتبطة
+            // ============================================
+            var subscriptions = await _unitOfWork.Subscriptions.GetAllAsync(s => s.SubscriberId == id);
+
+            foreach (var subscription in subscriptions)
+            {
+                await _unitOfWork.Subscriptions.SoftDeleteAsync(subscription);
+                _logger.LogInformation("Cascade soft deleted Subscription {SubscriptionId}", subscription.Id);
+            }
+
+            // ============================================
+            // حذف Subscriber
+            // ============================================
+            await _unitOfWork.Subscribers.SoftDeleteAsync(subscriber);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Subscriber {SubscriberId} soft deleted successfully with {Count} subscriptions",
+                id, subscriptions.Count());
+        }
+
+        // ============================================
+        // RESTORE (جديد)
+        // ============================================
+
+        /// <summary>
+        /// استرجاع مشترك محذوف
+        /// ⚠️ لا يسترجع Subscriptions تلقائياً (يجب استرجاعها يدوياً إذا لزم)
+        /// </summary>
+        public async Task<bool> RestoreAsync(int id)
+        {
+            _logger.LogInformation("Attempting to restore Subscriber {SubscriberId}", id);
+
+            var restored = await _unitOfWork.Subscribers.RestoreByIdAsync(id);
+
+            if (restored)
+            {
+                await _unitOfWork.SaveChangesAsync();
+                _logger.LogInformation("Subscriber {SubscriberId} restored successfully", id);
+            }
+            else
+            {
+                _logger.LogWarning("Subscriber {SubscriberId} not found or not deleted", id);
+            }
+
+            return restored;
+        }
+
+        // ============================================
+        // GET DELETED (جديد)
+        // ============================================
+
+        /// <summary>
+        /// الحصول على المشتركين المحذوفين
+        /// </summary>
+        public async Task<PagedResultDto<SubscriberDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10)
+        {
+            var deleted = await _unitOfWork.Subscribers.GetDeletedAsync();
+
+            var totalCount = deleted.Count();
+            var items = deleted
+                .OrderByDescending(s => s.DeletedAt)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedResultDto<SubscriberDto>
+            {
+                Items = _mapper.Map<List<SubscriberDto>>(items),
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
+        }
+
+        // ============================================
+        // PERMANENT DELETE (جديد - SuperAdmin only)
+        // ============================================
+
+        /// <summary>
+        /// حذف نهائي للمشترك من Database
+        /// ⚠️ SuperAdmin only
+        /// ⚠️ لا يمكن التراجع
+        /// ✅ يُستخدم بعد انتهاء Retention Period
+        /// </summary>
+        public async Task<bool> PermanentDeleteAsync(int id)
+        {
+            _logger.LogWarning("Permanent delete requested for Subscriber {SubscriberId}", id);
+
+            // 1. الحصول على Subscriber (بما فيهم المحذوف)
+            var subscriber = await _unitOfWork.Subscribers.GetByIdIncludingDeletedAsync(id);
+
+            if (subscriber == null)
+            {
+                _logger.LogWarning("Subscriber {SubscriberId} not found for permanent delete", id);
+                return false;
+            }
+
+            // 2. التحقق من أنه محذوف (Soft Deleted)
+            if (!subscriber.IsDeleted)
+            {
+                throw new InvalidOperationException("لا يمكن الحذف النهائي لمشترك نشط. استخدم Soft Delete أولاً");
+            }
+
+            // 3. حذف Subscriptions المرتبطة نهائياً
+            var subscriptions = await _unitOfWork.Subscriptions.GetAllIncludingDeletedAsync();
+            var subscriberSubs = subscriptions.Where(s => s.SubscriberId == id);
+
+            foreach (var subscription in subscriberSubs)
+            {
+                await _unitOfWork.Subscriptions.DeleteAsync(subscription);
+                _logger.LogInformation("Permanently deleted Subscription {SubscriptionId}", subscription.Id);
+            }
+
+            // 4. حذف Subscriber نهائياً
             await _unitOfWork.Subscribers.DeleteAsync(subscriber);
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogWarning("Subscriber {SubscriberId} permanently deleted with {Count} subscriptions",
+                id, subscriberSubs.Count());
+
+            return true;
         }
 
         // ============================================
         // Helper Methods
         // ============================================
 
-        /// <summary>
-        /// التحقق من وجود رقم هاتف
-        /// </summary>
         public async Task<bool> PhoneNumberExistsAsync(string phoneNumber, int? excludeId = null)
         {
             var subscribers = await _unitOfWork.Subscribers.GetAllAsync(s => s.PhoneNumber == phoneNumber);
@@ -208,9 +320,6 @@ namespace ISP.Infrastructure.Services
             return subscribers.Any();
         }
 
-        /// <summary>
-        /// ربط مشترك بـ Telegram
-        /// </summary>
         public async Task<bool> LinkTelegramAsync(int subscriberId, string chatId)
         {
             var subscriber = await _unitOfWork.Subscribers.GetByIdAsync(subscriberId);

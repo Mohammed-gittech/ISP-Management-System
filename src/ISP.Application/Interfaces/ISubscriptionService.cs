@@ -14,6 +14,11 @@ namespace ISP.Application.Interfaces
         Task<PagedResultDto<SubscriptionDto>> GetExpiringAsync(int days, int pageNumber = 1, int pageSize = 10);
         Task<PagedResultDto<SubscriptionDto>> GetExpiredAsync(int pageNumber = 1, int pageSize = 10);
         Task UpdateStatusesAsync(); // Background Job
+
+        // SOFT DELETE
         Task<bool> CancelAsync(int id);
+        Task<bool> RestoreAsync(int id);
+        Task<PagedResultDto<SubscriptionDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10);
+        Task<bool> PermanentDeleteAsync(int id);
     }
 }

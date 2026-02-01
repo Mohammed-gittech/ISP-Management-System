@@ -8,6 +8,7 @@ namespace ISP.API.Controllers
     /// <summary>
     /// Controller لإدارة الاشتراكات
     /// ✅ Multi-Tenancy: Repository Filter يطبق تلقائياً
+    /// ✅ Soft Delete Support
     /// </summary>
     [Authorize]
     [ApiController]
@@ -21,9 +22,13 @@ namespace ISP.API.Controllers
             _service = service;
         }
 
+        // ============================================
+        // BASIC CRUD OPERATIONS
+        // ============================================
+
         /// <summary>
         /// الحصول على كل الاشتراكات
-        /// ✅ Repository Filter: يرجع اشتراكات Tenant الحالي فقط
+        /// ✅ Repository Filter: يرجع اشتراكات Tenant الحالي فقط (النشطة)
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
@@ -39,7 +44,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// الحصول على اشتراك بالـ Id
-        /// ✅ Repository Filter: إذا كان من Tenant آخر يرجع null
+        /// ✅ Repository Filter: إذا كان من Tenant آخر أو محذوف يرجع null
         /// </summary>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
@@ -126,38 +131,61 @@ namespace ISP.API.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateSubscriptionDto dto)
         {
-            var result = await _service.CreateAsync(dto);
+            try
+            {
+                var result = await _service.CreateAsync(dto);
 
-            return CreatedAtAction(
-                nameof(GetById),
-                new { id = result.Id },
-                new
+                return CreatedAtAction(
+                    nameof(GetById),
+                    new { id = result.Id },
+                    new
+                    {
+                        success = true,
+                        message = "تم إنشاء الاشتراك بنجاح",
+                        data = result
+                    });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
                 {
-                    success = true,
-                    message = "تم إنشاء الاشتراك بنجاح",
-                    data = result
+                    success = false,
+                    message = ex.Message
                 });
+            }
         }
 
         /// <summary>
         /// تجديد اشتراك
+        /// ✅ يحذف القديم (Soft Delete) ويُنشئ جديد
         /// </summary>
         [HttpPost("renew")]
         public async Task<IActionResult> Renew([FromBody] RenewSubscriptionDto dto)
         {
-            var result = await _service.RenewAsync(dto);
-
-            return Ok(new
+            try
             {
-                success = true,
-                message = "تم تجديد الاشتراك بنجاح",
-                data = result
-            });
+                var result = await _service.RenewAsync(dto);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "تم تجديد الاشتراك بنجاح",
+                    data = result
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
         }
 
         /// <summary>
-        /// إلغاء اشتراك
-        /// ✅ Repository Filter: GetByIdAsync يتحقق من Ownership
+        /// إلغاء اشتراك (Soft Delete)
+        /// ✅ يمكن استرجاعه لاحقاً
         /// </summary>
         [HttpPost("{id}/cancel")]
         public async Task<IActionResult> Cancel(int id)
@@ -176,8 +204,93 @@ namespace ISP.API.Controllers
             return Ok(new
             {
                 success = true,
-                message = "تم إلغاء الاشتراك بنجاح"
+                message = "تم إلغاء الاشتراك بنجاح (يمكن الاسترجاع)"
             });
+        }
+
+        // ============================================
+        // SOFT DELETE OPERATIONS (جديد)
+        // ============================================
+
+        /// <summary>
+        /// استرجاع اشتراك ملغي
+        /// </summary>
+        [HttpPost("{id}/restore")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<IActionResult> Restore(int id)
+        {
+            var restored = await _service.RestoreAsync(id);
+
+            if (!restored)
+            {
+                return NotFound(new
+                {
+                    success = false,
+                    message = "الاشتراك غير موجود أو غير ملغي"
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "تم استرجاع الاشتراك بنجاح"
+            });
+        }
+
+        /// <summary>
+        /// الحصول على الاشتراكات الملغاة
+        /// </summary>
+        [HttpGet("deleted")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<IActionResult> GetDeleted(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
+        {
+            var result = await _service.GetDeletedAsync(page, pageSize);
+
+            return Ok(new
+            {
+                success = true,
+                data = result,
+                message = "الاشتراكات الملغاة (يمكن استرجاعها)"
+            });
+        }
+
+        /// <summary>
+        /// حذف نهائي (SuperAdmin فقط)
+        /// ⚠️ لا يمكن التراجع
+        /// </summary>
+        [HttpDelete("{id}/permanent")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> PermanentDelete(int id)
+        {
+            try
+            {
+                var deleted = await _service.PermanentDeleteAsync(id);
+
+                if (!deleted)
+                {
+                    return NotFound(new
+                    {
+                        success = false,
+                        message = "الاشتراك غير موجود"
+                    });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "⚠️ تم الحذف النهائي - لا يمكن الاسترجاع"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
         }
     }
 }

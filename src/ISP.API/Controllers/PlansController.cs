@@ -7,6 +7,8 @@ namespace ISP.API.Controllers
 {
     /// <summary>
     /// Controller لإدارة الباقات
+    /// ✅ Multi-Tenancy: Repository Filter يطبق تلقائياً
+    /// ✅ Soft Delete Support
     /// </summary>
     [Authorize]
     [ApiController]
@@ -20,14 +22,18 @@ namespace ISP.API.Controllers
             _service = service;
         }
 
+        // ============================================
+        // BASIC CRUD OPERATIONS
+        // ============================================
+
         /// <summary>
         /// الحصول على كل الباقات
-        ///  Repository Filter: يرجع باقات Tenant الحالي فقط
+        /// ✅ Repository Filter: يرجع باقات Tenant الحالي فقط (النشطة)
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetAll([FromQuery] int Page = 1, [FromQuery] int pageSize = 10)
+        public async Task<IActionResult> GetAll([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
         {
-            var result = await _service.GetAllAsync(Page, pageSize);
+            var result = await _service.GetAllAsync(page, pageSize);
 
             return Ok(new
             {
@@ -53,7 +59,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// الحصول على باقة بالـ Id
-        /// ✅ Repository Filter: إذا كانت من Tenant آخر يرجع null
+        /// ✅ Repository Filter: إذا كانت من Tenant آخر أو محذوفة يرجع null
         /// </summary>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
@@ -78,7 +84,7 @@ namespace ISP.API.Controllers
 
         /// <summary>
         /// إنشاء باقة جديدة
-        ///  ✅ Service: يعين TenantId تلقائياً
+        /// ✅ Service: يعين TenantId تلقائياً
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreatePlanDto dto)
@@ -122,12 +128,136 @@ namespace ISP.API.Controllers
                     message = ex.Message
                 });
             }
-
-
         }
 
         /// <summary>
-        /// تعطيل باقة
+        /// حذف ناعم للباقة
+        /// ⚠️ لا يمكن حذف باقة لها اشتراكات نشطة
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            try
+            {
+                var deleted = await _service.DeleteAsync(id);
+
+                if (!deleted)
+                {
+                    return NotFound(new
+                    {
+                        success = false,
+                        message = "الباقة غير موجودة"
+                    });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "تم حذف الباقة بنجاح (يمكن الاسترجاع)"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+        }
+
+        // ============================================
+        // SOFT DELETE OPERATIONS (جديد)
+        // ============================================
+
+        /// <summary>
+        /// استرجاع باقة محذوفة
+        /// </summary>
+        [HttpPost("{id}/restore")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<IActionResult> Restore(int id)
+        {
+            var restored = await _service.RestoreAsync(id);
+
+            if (!restored)
+            {
+                return NotFound(new
+                {
+                    success = false,
+                    message = "الباقة غير موجودة أو غير محذوفة"
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "تم استرجاع الباقة بنجاح"
+            });
+        }
+
+        /// <summary>
+        /// الحصول على الباقات المحذوفة
+        /// </summary>
+        [HttpGet("deleted")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<IActionResult> GetDeleted(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
+        {
+            var result = await _service.GetDeletedAsync(page, pageSize);
+
+            return Ok(new
+            {
+                success = true,
+                data = result,
+                message = "الباقات المحذوفة (يمكن استرجاعها)"
+            });
+        }
+
+        /// <summary>
+        /// حذف نهائي (SuperAdmin فقط)
+        /// ⚠️ لا يمكن الحذف إذا كانت مستخدمة في اشتراكات
+        /// </summary>
+        [HttpDelete("{id}/permanent")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> PermanentDelete(int id)
+        {
+            try
+            {
+                var deleted = await _service.PermanentDeleteAsync(id);
+
+                if (!deleted)
+                {
+                    return NotFound(new
+                    {
+                        success = false,
+                        message = "الباقة غير موجودة"
+                    });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "⚠️ تم الحذف النهائي - لا يمكن الاسترجاع"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+        }
+
+        // ============================================
+        // ACTIVATE/DEACTIVATE (موجود مسبقاً)
+        // ============================================
+
+        /// <summary>
+        /// تعطيل باقة (IsActive = false)
+        /// ℹ️ مختلف عن Soft Delete
         /// </summary>
         [HttpPost("{id}/deactivate")]
         public async Task<IActionResult> Deactivate(int id)
@@ -151,7 +281,7 @@ namespace ISP.API.Controllers
         }
 
         /// <summary>
-        /// تفعيل باقة
+        /// تفعيل باقة (IsActive = true)
         /// </summary>
         [HttpPost("{id}/activate")]
         public async Task<IActionResult> Activate(int id)

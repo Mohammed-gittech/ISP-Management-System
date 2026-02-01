@@ -18,16 +18,23 @@ namespace ISP.Infrastructure.Data.Configurations
                 .IsRequired()
                 .HasMaxLength(50);
 
+            // UNIQUE INDEXES (Filtered for Active Users Only)
+            // Username فريد (فقط للمستخدمين النشطين)
             builder.HasIndex(u => u.Username)
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0") // ✅ Filtered Index
+                .HasDatabaseName("IX_Users_Username_Unique");
 
             // Email: مطلوب، فريد
             builder.Property(u => u.Email)
                 .IsRequired()
                 .HasMaxLength(100);
 
+            // Email فريد (فقط للمستخدمين النشطين)
             builder.HasIndex(u => u.Email)
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0") // ✅ Filtered Index
+                .HasDatabaseName("IX_Users_Email_Unique");
 
             // PasswordHash: مطلوب
             builder.Property(u => u.PasswordHash)
@@ -38,6 +45,15 @@ namespace ISP.Infrastructure.Data.Configurations
             builder.Property(u => u.Role)
                 .HasConversion<string>()
                 .IsRequired();
+
+            // SOFT DELETE SUPPORT     
+            // IsDeleted: Index لتسريع الاستعلامات       
+            builder.HasIndex(u => new { u.TenantId, u.IsDeleted })
+                .HasDatabaseName("IX_Users_TenantId_IsDeleted");
+
+            // DeletedAt: Index لـ Retention Cleanup
+            builder.HasIndex(u => new { u.IsDeleted, u.DeletedAt })
+                .HasDatabaseName("IX_Users_IsDeleted_DeletedAt");
 
             // Relationship: User → Tenant (اختياري للـ SuperAdmin)
             builder.HasOne(u => u.Tenant)

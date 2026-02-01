@@ -1,6 +1,3 @@
-// ============================================
-// UserService.cs - تنفيذ خدمة المستخدمين
-// ============================================
 using AutoMapper;
 using ISP.Application.DTOs;
 using ISP.Application.DTOs.Users;
@@ -12,6 +9,11 @@ using Microsoft.Extensions.Logging;
 
 namespace ISP.Infrastructure.Services
 {
+    /// <summary>
+    /// خدمة إدارة المستخدمين
+    /// ✅ Soft Delete Support
+    /// ⚠️ حذف Users أكثر حساسية من Entities الأخرى
+    /// </summary>
     public class UserService : IUserService
     {
         private readonly IUnitOfWork _unitOfWork;
@@ -35,7 +37,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 1. GET BY ID
+        // GET BY ID
         // ============================================
         public async Task<UserDto?> GetByIdAsync(int id)
         {
@@ -55,13 +57,13 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 2. GET ALL (مع Pagination + Search)
+        // GET ALL (مع Pagination + Search)
         // ============================================
         public async Task<PagedResultDto<UserDto>> GetAllAsync(int pageNumber = 1, int pageSize = 10, string? searchTerm = null)
         {
             IEnumerable<User> allUsers;
 
-            // 2. تطبيق البحث إذا وُجد
+            // تطبيق البحث إذا وُجد
             if (!string.IsNullOrWhiteSpace(searchTerm))
             {
                 allUsers = await _unitOfWork.Users.GetAllAsync(u =>
@@ -72,20 +74,20 @@ namespace ISP.Infrastructure.Services
                 allUsers = await _unitOfWork.Users.GetAllAsync();
             }
 
-            // 3. حساب الإجمالي
+            // حساب الإجمالي
             var totalCount = allUsers.Count();
 
-            // 4. تطبيق Pagination + Sorting
+            // تطبيق Pagination + Sorting
             var users = allUsers
                 .OrderByDescending(u => u.CreatedAt)
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .ToList();
 
-            // 5. تحويل إلى DTOs
+            // تحويل إلى DTOs
             var userDtos = _mapper.Map<List<UserDto>>(users);
 
-            // 6. إضافة أسماء الوكلاء
+            // إضافة أسماء الوكلاء
             foreach (var dto in userDtos)
             {
                 if (dto.TenantId.HasValue)
@@ -105,7 +107,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 3. CREATE USER
+        // CREATE USER
         // ============================================
         public async Task<UserDto> CreateAsync(CreateUserDto dto)
         {
@@ -145,7 +147,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 4. UPDATE USER
+        // UPDATE USER
         // ============================================
         public async Task<UserDto?> UpdateAsync(int id, UpdateUserDto dto)
         {
@@ -179,8 +181,14 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 5. DELETE USER
+        // SOFT DELETE (محدث - حذر!)
         // ============================================
+
+        /// <summary>
+        /// حذف ناعم لمستخدم
+        /// ⚠️ حذف مستخدم قد يسبب مشاكل في Authentication/Authorization
+        /// ✅ يُوصى بـ Deactivate (IsActive = false) بدلاً من Delete
+        /// </summary>
         public async Task<bool> DeleteAsync(int id)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(id);
@@ -196,17 +204,134 @@ namespace ISP.Infrastructure.Services
                     throw new InvalidOperationException("لا يمكن حذف آخر SuperAdmin");
             }
 
-            await _unitOfWork.Users.DeleteAsync(user);
+            // منع حذف المستخدم الحالي
+            if (_currentTenantService.UserId == id)
+            {
+                throw new InvalidOperationException("لا يمكنك حذف نفسك");
+            }
+
+            _logger.LogWarning("Soft deleting User {UserId} - {Username}", id, user.Username);
+
+            await _unitOfWork.Users.SoftDeleteAsync(user);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("User deleted: {UserId}", id);
+            _logger.LogInformation("User {UserId} soft deleted successfully", id);
 
             return true;
         }
 
         // ============================================
-        // 6. CHANGE PASSWORD
+        // RESTORE (جديد)
         // ============================================
+
+        public async Task<bool> RestoreAsync(int id)
+        {
+            _logger.LogInformation("Attempting to restore User {UserId}", id);
+
+            // التحقق من عدم تكرار Email/Username بعد الاسترجاع
+            var user = await _unitOfWork.Users.GetByIdIncludingDeletedAsync(id);
+
+            if (user == null || !user.IsDeleted)
+                return false;
+
+            // التحقق من تفرّد Email/Username (قبل الاسترجاع)
+            var existingEmail = await _unitOfWork.Users.GetAllAsync(u => u.Email == user.Email);
+            if (existingEmail.Any())
+            {
+                throw new InvalidOperationException(
+                    $"لا يمكن الاسترجاع. البريد الإلكتروني {user.Email} مستخدم من قبل مستخدم آخر");
+            }
+
+            var existingUsername = await _unitOfWork.Users.GetAllAsync(u => u.Username == user.Username);
+            if (existingUsername.Any())
+            {
+                throw new InvalidOperationException(
+                    $"لا يمكن الاسترجاع. اسم المستخدم {user.Username} مستخدم من قبل مستخدم آخر");
+            }
+
+            var restored = await _unitOfWork.Users.RestoreByIdAsync(id);
+
+            if (restored)
+            {
+                await _unitOfWork.SaveChangesAsync();
+                _logger.LogInformation("User {UserId} restored successfully", id);
+            }
+
+            return restored;
+        }
+
+        // ============================================
+        // GET DELETED (جديد)
+        // ============================================
+
+        public async Task<PagedResultDto<UserDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10)
+        {
+            var deleted = await _unitOfWork.Users.GetDeletedAsync();
+
+            var totalCount = deleted.Count();
+            var items = deleted
+                .OrderByDescending(u => u.DeletedAt)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            var userDtos = _mapper.Map<List<UserDto>>(items);
+
+            // إضافة أسماء الوكلاء
+            foreach (var dto in userDtos)
+            {
+                if (dto.TenantId.HasValue)
+                {
+                    var tenant = await _unitOfWork.Tenants.GetByIdAsync(dto.TenantId.Value);
+                    dto.TenantName = tenant?.Name ?? "";
+                }
+            }
+
+            return new PagedResultDto<UserDto>
+            {
+                Items = userDtos,
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
+        }
+
+        // ============================================
+        // PERMANENT DELETE (جديد - SuperAdmin only)
+        // ============================================
+
+        public async Task<bool> PermanentDeleteAsync(int id)
+        {
+            _logger.LogCritical("PERMANENT DELETE requested for User {UserId}", id);
+
+            var user = await _unitOfWork.Users.GetByIdIncludingDeletedAsync(id);
+
+            if (user == null)
+                return false;
+
+            if (!user.IsDeleted)
+            {
+                throw new InvalidOperationException("لا يمكن الحذف النهائي لمستخدم نشط. استخدم Soft Delete أولاً");
+            }
+
+            // منع حذف SuperAdmin حتى لو محذوف soft
+            if (user.Role == UserRole.SuperAdmin)
+            {
+                throw new InvalidOperationException("لا يمكن الحذف النهائي لحساب SuperAdmin");
+            }
+
+            await _unitOfWork.Users.DeleteAsync(user);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogCritical("User {UserId} - {Username} PERMANENTLY DELETED", id, user.Username);
+
+            return true;
+        }
+
+        // ============================================
+        // PASSWORD OPERATIONS
+        // ============================================
+
         public async Task<bool> ChangePasswordAsync(int userId, ChangePasswordDto dto)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
@@ -227,9 +352,6 @@ namespace ISP.Infrastructure.Services
             return true;
         }
 
-        // ============================================
-        // 7. RESET PASSWORD (Admin only)
-        // ============================================
         public async Task<bool> ResetPasswordAsync(int userId, string newPassword)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
@@ -246,8 +368,9 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 8. ASSIGN ROLE
+        // ASSIGN ROLE
         // ============================================
+
         public async Task<bool> AssignRoleAsync(int userId, string role)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
@@ -267,24 +390,21 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 9. GET USERS BY TENANT
+        // GET USERS BY TENANT
         // ============================================
+
         public async Task<PagedResultDto<UserDto>> GetUsersByTenantAsync(int tenantId, int pageNumber, int pageSize)
         {
-            // 1. جلب جميع المستخدمين
-            // 2. تصفية حسب TenantId
             var tenantUsers = await _unitOfWork.Users.GetByTenantAsync(tenantId);
-            // 3. حساب الإجمالي
+
             var totalCount = tenantUsers.Count();
 
-            // 4. تطبيق Pagination
             var users = tenantUsers
                 .OrderByDescending(u => u.CreatedAt)
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .ToList();
 
-            // 5. تحويل إلى DTOs
             var userDtos = _mapper.Map<List<UserDto>>(users);
 
             return new PagedResultDto<UserDto>
@@ -297,8 +417,9 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // 10. VALIDATION HELPERS
+        // VALIDATION HELPERS
         // ============================================
+
         public async Task<bool> IsEmailUniqueAsync(string email, int? excludeUserId = null)
         {
             var users = await _unitOfWork.Users.GetAllAsync(u => u.Email == email);

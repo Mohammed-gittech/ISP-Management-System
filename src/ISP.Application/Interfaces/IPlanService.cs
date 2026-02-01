@@ -14,5 +14,11 @@ namespace ISP.Application.Interfaces
         Task<bool> DeactivateAsync(int id);
         Task<bool> ActivateAsync(int id);
 
+        // SOFT DELETE
+        Task<bool> DeleteAsync(int id);
+        Task<bool> RestoreAsync(int id);
+        Task<PagedResultDto<PlanDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10);
+        Task<bool> PermanentDeleteAsync(int id);
+
     }
 }

@@ -52,12 +52,24 @@ namespace ISP.Infrastructure.Data.Configurations
             builder.Property(s => s.Notes)
                 .HasMaxLength(500);
 
+            // SOFT DELETE SUPPORT
+            // IsDeleted: Index لتسريع الاستعلامات
+            builder.HasIndex(s => new { s.TenantId, s.IsDeleted })
+                .HasDatabaseName("IX_Subscribers_TenantId_IsDeleted");
+
+            // DeletedAt: Index لـ Retention Cleanup
+            builder.HasIndex(s => new { s.IsDeleted, s.DeletedAt })
+                .HasDatabaseName("IX_Subscribers_IsDeleted_DeletedAt");
+
             // Indexes
             builder.HasIndex(s => s.TenantId);
 
             // PhoneNumber فريد لكل Tenant (Composite Index)
             builder.HasIndex(s => new { s.TenantId, s.PhoneNumber })
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0") // ✅ Filtered Index
+                .HasDatabaseName("IX_Subscribers_TenantId_PhoneNumber_Unique"); ;
+
 
             // Relationship: Subscriber → Tenant
             builder.HasOne(s => s.Tenant)

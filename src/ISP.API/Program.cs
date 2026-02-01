@@ -129,6 +129,7 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 // ============================================
 builder.Services.AddScoped<NotificationJob>();
 builder.Services.AddScoped<SubscriptionStatusJob>();
+builder.Services.AddScoped<RetentionCleanupJob>();
 
 // ============================================
 // Phase 3: Users Management Service
@@ -347,6 +348,16 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
             TimeZone = TimeZoneInfo.Utc
         }
     );
+
+    //جدولة Retention Cleanup Job
+    RecurringJob.AddOrUpdate<RetentionCleanupJob>(
+        "retention-cleanup",
+        job => job.ExecuteAsync(),
+        Cron.Daily(2, 0), // يعمل كل يوم الساعة 2:00 صباحاً
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Local
+        });
 }
 
 // ============================================

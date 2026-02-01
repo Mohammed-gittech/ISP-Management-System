@@ -14,7 +14,6 @@ namespace ISP.Application.Interfaces
         Task<PagedResultDto<UserDto>> GetAllAsync(int pageNumber, int pageSize, string? searchTerm = null);
         Task<UserDto> CreateAsync(CreateUserDto dto);
         Task<UserDto?> UpdateAsync(int id, UpdateUserDto dto);
-        Task<bool> DeleteAsync(int id);
 
         // Password Management
         Task<bool> ChangePasswordAsync(int userId, ChangePasswordDto dto);
@@ -29,5 +28,11 @@ namespace ISP.Application.Interfaces
         // Validation
         Task<bool> IsEmailUniqueAsync(string email, int? excludeUserId = null);
         Task<bool> IsUsernameUniqueAsync(string username, int? excludeUserId = null);
+
+        // SOFT DELETE
+        Task<bool> DeleteAsync(int id);
+        Task<bool> RestoreAsync(int id);
+        Task<PagedResultDto<UserDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10);
+        Task<bool> PermanentDeleteAsync(int id);
     }
 }

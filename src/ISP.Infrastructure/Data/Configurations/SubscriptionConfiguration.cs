@@ -35,6 +35,15 @@ namespace ISP.Infrastructure.Data.Configurations
             builder.Property(sub => sub.Notes)
                 .HasMaxLength(500);
 
+            // SOFT DELETE SUPPORT
+            // IsDeleted: Index لتسريع الاستعلامات
+            builder.HasIndex(sub => new { sub.TenantId, sub.IsDeleted })
+                .HasDatabaseName("IX_Subscriptions_TenantId_IsDeleted");
+
+            // DeletedAt: Index لـ Retention Cleanup
+            builder.HasIndex(sub => new { sub.IsDeleted, sub.DeletedAt })
+                .HasDatabaseName("IX_Subscriptions_IsDeleted_DeletedAt");
+
             // Indexes
             builder.HasIndex(sub => sub.TenantId);
             builder.HasIndex(sub => sub.SubscriberId);

@@ -5,29 +5,36 @@ using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Enums;
 using ISP.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace ISP.Infrastructure.Services
 {
     /// <summary>
     /// خدمة إدارة الاشتراكات
+    /// ✅ Soft Delete Support
     /// </summary>
-    /// 
     public class SubscriptionService : ISubscriptionService
     {
-
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
         private readonly ICurrentTenantService _currentTenant;
+        private readonly ILogger<SubscriptionService> _logger;
 
         public SubscriptionService(
             IUnitOfWork unitOfWork,
             IMapper mapper,
-            ICurrentTenantService currentTenant)
+            ICurrentTenantService currentTenant,
+            ILogger<SubscriptionService> logger)
         {
             _unitOfWork = unitOfWork;
             _mapper = mapper;
             _currentTenant = currentTenant;
+            _logger = logger;
         }
+
+        // ============================================
+        // Basic CRUD
+        // ============================================
 
         public async Task<SubscriptionDto> CreateAsync(CreateSubscriptionDto dto)
         {
@@ -44,7 +51,7 @@ namespace ISP.Infrastructure.Services
             // 3. إنشاء الاشتراك
             var subscription = _mapper.Map<Subscription>(dto);
             subscription.TenantId = _currentTenant.TenantId;
-            subscription.Plan = plan; // لحساب EndDate
+            subscription.Plan = plan;
             subscription.CreatedAt = DateTime.UtcNow;
 
             // 4. حساب تاريخ الانتهاء
@@ -90,9 +97,8 @@ namespace ISP.Infrastructure.Services
             newSubscription.CalculateEndDate();
             newSubscription.UpdateStatus();
 
-            // 4. تحديث الاشتراك القديم
-            oldSubscription.Status = SubscriptionStatus.Expired;
-            await _unitOfWork.Subscriptions.UpdateAsync(oldSubscription);
+            // 4. تحديث الاشتراك القديم (Soft Delete)
+            await _unitOfWork.Subscriptions.SoftDeleteAsync(oldSubscription);
 
             // 5. حفظ الجديد
             await _unitOfWork.Subscriptions.AddAsync(newSubscription);
@@ -201,6 +207,13 @@ namespace ISP.Infrastructure.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
+        // ============================================
+        // SOFT DELETE (محدث)
+        // ============================================
+
+        /// <summary>
+        /// إلغاء اشتراك (Soft Delete)
+        /// </summary>
         public async Task<bool> CancelAsync(int id)
         {
             var subscription = await _unitOfWork.Subscriptions.GetByIdAsync(id);
@@ -208,10 +221,80 @@ namespace ISP.Infrastructure.Services
             if (subscription == null)
                 return false;
 
-            subscription.Status = SubscriptionStatus.Expired;
+            _logger.LogInformation("Canceling (soft deleting) Subscription {SubscriptionId}", id);
 
-            await _unitOfWork.Subscriptions.UpdateAsync(subscription);
+            // Soft Delete
+            await _unitOfWork.Subscriptions.SoftDeleteAsync(subscription);
             await _unitOfWork.SaveChangesAsync();
+
+            return true;
+        }
+
+        // ============================================
+        // RESTORE (جديد)
+        // ============================================
+
+        public async Task<bool> RestoreAsync(int id)
+        {
+            _logger.LogInformation("Attempting to restore Subscription {SubscriptionId}", id);
+
+            var restored = await _unitOfWork.Subscriptions.RestoreByIdAsync(id);
+
+            if (restored)
+            {
+                await _unitOfWork.SaveChangesAsync();
+                _logger.LogInformation("Subscription {SubscriptionId} restored successfully", id);
+            }
+
+            return restored;
+        }
+
+        // ============================================
+        // GET DELETED (جديد)
+        // ============================================
+
+        public async Task<PagedResultDto<SubscriptionDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10)
+        {
+            var deleted = await _unitOfWork.Subscriptions.GetDeletedAsync();
+
+            var totalCount = deleted.Count();
+            var items = deleted
+                .OrderByDescending(s => s.DeletedAt)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedResultDto<SubscriptionDto>
+            {
+                Items = _mapper.Map<List<SubscriptionDto>>(items),
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
+        }
+
+        // ============================================
+        // PERMANENT DELETE (جديد)
+        // ============================================
+
+        public async Task<bool> PermanentDeleteAsync(int id)
+        {
+            _logger.LogWarning("Permanent delete requested for Subscription {SubscriptionId}", id);
+
+            var subscription = await _unitOfWork.Subscriptions.GetByIdIncludingDeletedAsync(id);
+
+            if (subscription == null)
+                return false;
+
+            if (!subscription.IsDeleted)
+            {
+                throw new InvalidOperationException("لا يمكن الحذف النهائي لاشتراك نشط. استخدم Cancel أولاً");
+            }
+
+            await _unitOfWork.Subscriptions.DeleteAsync(subscription);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogWarning("Subscription {SubscriptionId} permanently deleted", id);
 
             return true;
         }
