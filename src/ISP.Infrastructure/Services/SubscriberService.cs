@@ -3,6 +3,7 @@ using ISP.Application.DTOs;
 using ISP.Application.DTOs.Subscribers;
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
+using ISP.Domain.Enums;
 using ISP.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -38,6 +39,25 @@ namespace ISP.Infrastructure.Services
 
         public async Task<SubscriberDto> CreateAsync(CreateSubscriberDto dto)
         {
+
+            // جلب Tenant الحالي
+            var tenant = await _unitOfWork.Tenants.GetByIdAsync(_currentTenant.TenantId);
+
+            if (tenant == null)
+            {
+                throw new InvalidOperationException("Tenant غير موجود");
+            }
+
+            // عدّ المشتركين الحاليين (النشطين فقط)
+            var currentSubscribersCount = await _unitOfWork.Subscribers.CountAsync();
+
+            // التحقق من الحد الأقصى
+            if (currentSubscribersCount >= tenant.MaxSubscribers)
+            {
+                throw new InvalidOperationException(
+                    $"تم الوصول للحد الأقصى من المشتركين ({tenant.MaxSubscribers}). " +
+                    $"يرجى ترقية خطة الاشتراك للإضافة المزيد.");
+            }
             // 1. Validation: التحقق من عدم وجود رقم هاتف مكرر
             if (await PhoneNumberExistsAsync(dto.PhoneNumber))
             {

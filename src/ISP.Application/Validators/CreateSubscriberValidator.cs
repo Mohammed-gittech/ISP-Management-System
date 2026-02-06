@@ -13,6 +13,7 @@ namespace ISP.Application.Validators
         {
             RuleFor(x => x.FullName)
                 .NotEmpty().WithMessage("الاسم الكامل مطلوب")
+                .MinimumLength(3).WithMessage("الاسم يجب أن يكون على الأقل 3 أحرف")
                 .MaximumLength(100).WithMessage("الاسم يجب أن لا يتجاوز 100 حرف");
 
             RuleFor(x => x.PhoneNumber)

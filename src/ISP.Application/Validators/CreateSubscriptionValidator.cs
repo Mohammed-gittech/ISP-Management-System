@@ -10,14 +10,13 @@ namespace ISP.Application.Validators
     {
         public CreateSubscriptionValidator()
         {
-            RuleFor(x => x.SubscriberId)
-                .GreaterThan(0).WithMessage("يجب اختيار المشترك");
+            RuleFor(x => x.SubscriberId).GreaterThan(0).WithMessage("يجب اختيار المشترك");
 
-            RuleFor(x => x.PlanId)
-                .GreaterThan(0).WithMessage("يجب اختيار الباقة");
+            RuleFor(x => x.PlanId).GreaterThan(0).WithMessage("يجب اختيار الباقة");
 
             RuleFor(x => x.StartDate)
-                .NotEmpty().WithMessage("تاريخ البدء مطلوب")
+                .NotEmpty()
+                .WithMessage("تاريخ البدء مطلوب")
                 .GreaterThanOrEqualTo(DateTime.UtcNow.Date)
                 .WithMessage("تاريخ البدء لا يمكن أن يكون في الماضي");
         }
