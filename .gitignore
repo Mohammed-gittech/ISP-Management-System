@@ -28,12 +28,18 @@ packages/
 logs/
 
 # Secrets (مهم جداً!)
+**/appsettings.secrets.json
+**/secrets.json
 appsettings.Development.json
 appsettings.Production.json
 **/appsettings.*.json
 !**/appsettings.json
 .env
 .env.local
+.env.production
+
+# Backup files
+*.backup
 
 # OS files
 .DS_Store

@@ -3,6 +3,7 @@ using FluentValidation;
 using FluentValidation.AspNetCore;
 using Hangfire;
 using Hangfire.SqlServer;
+using ISP.API.Extensions;
 using ISP.API.Middleware;
 using ISP.Application.Interfaces;
 using ISP.Application.Mappings;
@@ -22,6 +23,9 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ✅ Validate Configuration عند البداية
+builder.Configuration.ValidateRequiredSettings();
 
 // Add services to the container.
 // ============================================
@@ -221,6 +225,13 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+
+// ✅ Log Configuration Summary
+using (var scope = app.Services.CreateScope())
+{
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    builder.Configuration.LogConfigurationSummary(logger);
+}
 
 // ============================================
 // Middleware Pipeline
