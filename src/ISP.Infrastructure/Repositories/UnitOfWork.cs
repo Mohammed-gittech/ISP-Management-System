@@ -1,4 +1,3 @@
-
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Interfaces;
@@ -24,6 +23,11 @@ namespace ISP.Infrastructure.Repositories
         private IRepository<Subscription>? _subscriptions;
         private IRepository<Notification>? _notifications;
         private IRepository<AuditLog>? _auditLogs;
+
+        // Payment System
+        private IRepository<Payment>? _payments;
+        private IRepository<Invoice>? _invoices;
+        private IRepository<TenantPayment>? _tenantPayments;
 
         public UnitOfWork(
             ApplicationDbContext context,
@@ -64,6 +68,16 @@ namespace ISP.Infrastructure.Repositories
 
         public IRepository<AuditLog> AuditLogs =>
             _auditLogs ??= new GenericRepository<AuditLog>(_context, _currentTenantService);
+
+        // Payment System
+        public IRepository<Payment> Payments =>
+            _payments ??= new GenericRepository<Payment>(_context, _currentTenantService);
+
+        public IRepository<Invoice> Invoices =>
+            _invoices ??= new GenericRepository<Invoice>(_context, _currentTenantService);
+
+        public IRepository<TenantPayment> TenantPayments =>
+            _tenantPayments ??= new GenericRepository<TenantPayment>(_context, _currentTenantService);
 
         // ============================================
         // SaveChanges - Transaction

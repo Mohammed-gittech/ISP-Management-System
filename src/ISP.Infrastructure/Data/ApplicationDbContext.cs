@@ -36,6 +36,11 @@ namespace ISP.Infrastructure.Data
         public DbSet<Notification> Notifications => Set<Notification>();
         public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+        // Payment System
+        public DbSet<Invoice> Invoices => Set<Invoice>();
+        public DbSet<Payment> Payments => Set<Payment>();
+        public DbSet<TenantPayment> TenantPayments => Set<TenantPayment>();
+
         // ============================================
         // OnModelCreating - تكوين Model
         // ============================================

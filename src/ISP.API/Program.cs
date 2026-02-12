@@ -99,6 +99,7 @@ builder.Services.AddValidatorsFromAssemblyContaining<CreatePlanValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<CreateSubscriptionValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<UpdateSubscriberValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<CreateCashPaymentValidator>();
 
 // ============================================
 // Repository & Unit of Work
@@ -151,6 +152,12 @@ builder.Services.AddValidatorsFromAssemblyContaining<ChangePasswordValidator>();
 // Phase 3: Audit Log Service
 // ============================================
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+
+// ============================================
+// Payment System Services
+// ============================================
+builder.Services.AddScoped<IPaymentService, PaymentService>();
+builder.Services.AddScoped<IInvoiceService, InvoiceService>();
 
 // ============================================
 // HttpContextAccessor (مطلوب للـ IP Address)

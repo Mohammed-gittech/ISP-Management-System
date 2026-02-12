@@ -1,4 +1,3 @@
-
 using ISP.Domain.Entities;
 
 namespace ISP.Domain.Interfaces
@@ -13,6 +12,12 @@ namespace ISP.Domain.Interfaces
         IRepository<Subscription> Subscriptions { get; }
         IRepository<Notification> Notifications { get; }
         IRepository<AuditLog> AuditLogs { get; }
+
+        // Payment System
+        IRepository<Payment> Payments { get; }
+        IRepository<Invoice> Invoices { get; }
+        IRepository<TenantPayment> TenantPayments { get; }
+
         Task<int> SaveChangesAsync();
     }
 }

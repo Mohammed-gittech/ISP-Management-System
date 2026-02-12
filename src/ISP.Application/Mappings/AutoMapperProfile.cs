@@ -1,6 +1,8 @@
 using AutoMapper;
 using ISP.Application.DTOs.AuditLogs;
 using ISP.Application.DTOs.Auth;
+using ISP.Application.DTOs.Invoices;
+using ISP.Application.DTOs.Payments;
 using ISP.Application.DTOs.Plans;
 using ISP.Application.DTOs.Subscribers;
 using ISP.Application.DTOs.Subscriptions;
@@ -91,6 +93,30 @@ namespace ISP.Application.Mappings
             // AuditLog Mapping
             CreateMap<AuditLog, AuditLogDto>()
                 .ForMember(dest => dest.TenantName, opt => opt.Ignore());
+
+            // ============================================
+            // Payment Mappings
+            // ============================================
+            CreateMap<Payment, PaymentDto>()
+                .ForMember(dest => dest.SubscriberName, opt => opt.Ignore())
+                .ForMember(dest => dest.ReceivedByName, opt => opt.Ignore())
+                .ForMember(dest => dest.InvoiceNumber, opt => opt.Ignore());
+
+            CreateMap<Payment, PaymentListDto>()
+                .ForMember(dest => dest.SubscriberName, opt => opt.Ignore());
+
+            // ============================================
+            // Invoice Mappings
+            // ============================================
+            CreateMap<Invoice, InvoiceDto>()
+                .ForMember(dest => dest.SubscriberName, opt => opt.Ignore())
+                .ForMember(dest => dest.SubscriberPhone, opt => opt.Ignore())
+                .ForMember(dest => dest.SubscriberAddress, opt => opt.Ignore())
+                .ForMember(dest => dest.Items, opt => opt.Ignore())
+                .ForMember(dest => dest.PaymentMethod, opt => opt.Ignore());
+
+            CreateMap<Invoice, InvoiceListDto>()
+                .ForMember(dest => dest.SubscriberName, opt => opt.Ignore());
         }
     }
 }
