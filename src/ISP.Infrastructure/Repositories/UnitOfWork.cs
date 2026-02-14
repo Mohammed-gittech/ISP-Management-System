@@ -2,17 +2,22 @@ using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Interfaces;
 using ISP.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore.Storage; // ⭐ للـ Transactions
 
 namespace ISP.Infrastructure.Repositories
 {
     /// <summary>
     /// Unit of Work - إدارة Transactions
     /// كل التغييرات تُحفظ معاً أو لا شيء
+    /// ⭐ محدث: مع Transaction support + InvoiceCounter
     /// </summary>
     public class UnitOfWork : IUnitOfWork, IDisposable
     {
         private readonly ApplicationDbContext _context;
         private readonly ICurrentTenantService _currentTenantService;
+
+        // ⭐ للـ Transaction Management
+        private IDbContextTransaction? _currentTransaction;
 
         // Lazy initialization
         private IRepository<Tenant>? _tenants;
@@ -28,6 +33,7 @@ namespace ISP.Infrastructure.Repositories
         private IRepository<Payment>? _payments;
         private IRepository<Invoice>? _invoices;
         private IRepository<TenantPayment>? _tenantPayments;
+        private IRepository<InvoiceCounter>? _invoiceCounters; // ⭐ NEW
 
         public UnitOfWork(
             ApplicationDbContext context,
@@ -38,13 +44,9 @@ namespace ISP.Infrastructure.Repositories
         }
 
         // ============================================
-        // Repository Properties
+        // Repository Properties (Lazy Loading)
         // ============================================
 
-        /// <summary>
-        /// Tenants Repository
-        /// Lazy: ينشأ عند أول استخدام فقط
-        /// </summary>
         public IRepository<Tenant> Tenants =>
             _tenants ??= new GenericRepository<Tenant>(_context, _currentTenantService);
 
@@ -79,6 +81,78 @@ namespace ISP.Infrastructure.Repositories
         public IRepository<TenantPayment> TenantPayments =>
             _tenantPayments ??= new GenericRepository<TenantPayment>(_context, _currentTenantService);
 
+        // ⭐ NEW: InvoiceCounter Repository
+        public IRepository<InvoiceCounter> InvoiceCounters =>
+            _invoiceCounters ??= new GenericRepository<InvoiceCounter>(_context, _currentTenantService);
+
+        // ============================================
+        // Transaction Methods ⭐ NEW
+        // ============================================
+
+        /// <summary>
+        /// بدء Transaction جديدة
+        /// </summary>
+        public async Task BeginTransactionAsync()
+        {
+            if (_currentTransaction != null)
+            {
+                throw new InvalidOperationException("Transaction already in progress");
+            }
+
+            _currentTransaction = await _context.Database.BeginTransactionAsync();
+        }
+
+        /// <summary>
+        /// Commit التغييرات
+        /// </summary>
+        public async Task CommitTransactionAsync()
+        {
+            try
+            {
+                await SaveChangesAsync();
+
+                if (_currentTransaction != null)
+                {
+                    await _currentTransaction.CommitAsync();
+                }
+            }
+            catch
+            {
+                await RollbackTransactionAsync();
+                throw;
+            }
+            finally
+            {
+                if (_currentTransaction != null)
+                {
+                    await _currentTransaction.DisposeAsync();
+                    _currentTransaction = null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Rollback التغييرات
+        /// </summary>
+        public async Task RollbackTransactionAsync()
+        {
+            try
+            {
+                if (_currentTransaction != null)
+                {
+                    await _currentTransaction.RollbackAsync();
+                }
+            }
+            finally
+            {
+                if (_currentTransaction != null)
+                {
+                    await _currentTransaction.DisposeAsync();
+                    _currentTransaction = null;
+                }
+            }
+        }
+
         // ============================================
         // SaveChanges - Transaction
         // ============================================
@@ -98,6 +172,7 @@ namespace ISP.Infrastructure.Repositories
 
         public void Dispose()
         {
+            _currentTransaction?.Dispose();
             _context.Dispose();
         }
     }

@@ -1,9 +1,15 @@
 using ISP.Domain.Entities;
-
 namespace ISP.Domain.Interfaces
 {
+    /// <summary>
+    /// Unit of Work Pattern
+    /// يوفر وصول موحد لجميع Repositories
+    /// </summary>
     public interface IUnitOfWork : IDisposable
     {
+        // ============================================
+        // Repositories
+        // ============================================
         IRepository<Tenant> Tenants { get; }
         IRepository<TenantSubscription> TenantSubscriptions { get; }
         IRepository<User> Users { get; }
@@ -17,7 +23,34 @@ namespace ISP.Domain.Interfaces
         IRepository<Payment> Payments { get; }
         IRepository<Invoice> Invoices { get; }
         IRepository<TenantPayment> TenantPayments { get; }
+        IRepository<InvoiceCounter> InvoiceCounters { get; } // ⭐ NEW
 
+        // ============================================
+        // Transaction Methods ⭐ NEW
+        // ============================================
+
+        /// <summary>
+        /// بدء Transaction جديدة
+        /// </summary>
+        Task BeginTransactionAsync();
+
+        /// <summary>
+        /// Commit التغييرات
+        /// </summary>
+        Task CommitTransactionAsync();
+
+        /// <summary>
+        /// Rollback التغييرات
+        /// </summary>
+        Task RollbackTransactionAsync();
+
+        // ============================================
+        // Save Changes
+        // ============================================
+
+        /// <summary>
+        /// حفظ جميع التغييرات
+        /// </summary>
         Task<int> SaveChangesAsync();
     }
 }

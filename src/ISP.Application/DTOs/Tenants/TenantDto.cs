@@ -11,6 +11,11 @@ namespace ISP.Application.DTOs.Tenants
         public string? Subdomain { get; set; }
         public string ContactEmail { get; set; } = string.Empty;
         public string? ContactPhone { get; set; }
+
+        public string? Address { get; set; }
+        public string? City { get; set; }
+        public string? Country { get; set; }
+
         public string SubscriptionPlan { get; set; } = string.Empty;
         public int MaxSubscribers { get; set; }
         public int CurrentSubscribers { get; set; }

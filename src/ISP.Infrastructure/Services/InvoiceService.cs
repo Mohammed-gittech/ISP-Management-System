@@ -188,10 +188,39 @@ namespace ISP.Infrastructure.Services
                 customerAddress = invoiceDto.SubscriberAddress;
             }
 
+            // ============================================
+            // بناء عنوان الشركة - NEW ⭐
+            // ============================================
+            string companyAddress;
+
+            if (!string.IsNullOrEmpty(tenant?.Address))
+            {
+                // استخدام عنوان الوكيل الفعلي
+                var addressParts = new List<string>();
+
+                if (!string.IsNullOrEmpty(tenant.Address))
+                    addressParts.Add(tenant.Address);
+
+                if (!string.IsNullOrEmpty(tenant.City))
+                    addressParts.Add(tenant.City);
+
+                if (!string.IsNullOrEmpty(tenant.Country))
+                    addressParts.Add(tenant.Country);
+                else
+                    addressParts.Add("Iraq"); // Fallback
+
+                companyAddress = string.Join(", ", addressParts);
+            }
+            else
+            {
+                // Fallback للوكلاء بدون عنوان
+                companyAddress = "Iraq";
+            }
+
             return new InvoicePrintDto
             {
                 CompanyName = tenant?.Name ?? "ISP Company",
-                CompanyAddress = "Baghdad, Iraq", // TODO: Add to Tenant
+                CompanyAddress = companyAddress, // ✅ عنوان ديناميكي
                 CompanyPhone = tenant?.ContactPhone,
                 CompanyEmail = tenant?.ContactEmail,
                 CompanyLogo = null, // TODO: Add logo support

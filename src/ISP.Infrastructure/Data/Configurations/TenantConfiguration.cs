@@ -35,6 +35,21 @@ namespace ISP.Infrastructure.Data.Configurations
             builder.Property(t => t.ContactPhone)
                 .HasMaxLength(20);
 
+            // Address: اختياري
+            builder.Property(t => t.Address)
+                .HasMaxLength(500)
+                .IsRequired(false);
+
+            // City: اختياري
+            builder.Property(t => t.City)
+                .HasMaxLength(100)
+                .IsRequired(false);
+
+            // Country: اختياري
+            builder.Property(t => t.Country)
+                .HasMaxLength(100)
+                .IsRequired(false);
+
             // SubscriptionPlan: Enum يُحفظ كـ string
             builder.Property(t => t.SubscriptionPlan)
                 .HasConversion<string>()

@@ -4,6 +4,7 @@ using ISP.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ISP.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260213122714_AddTenantAddressFields")]
+    partial class AddTenantAddressFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -208,54 +211,6 @@ namespace ISP.Infrastructure.Migrations
                     b.HasIndex("TenantId", "Status", "IssuedDate");
 
                     b.ToTable("Invoices", (string)null);
-                });
-
-            modelBuilder.Entity("ISP.Domain.Entities.InvoiceCounter", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasDefaultValueSql("GETUTCDATE()");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("LastNumber")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
-                    b.Property<int>("TenantId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasDefaultValueSql("GETUTCDATE()");
-
-                    b.Property<int>("Year")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId")
-                        .HasDatabaseName("IX_InvoiceCounters_TenantId");
-
-                    b.HasIndex("TenantId", "Year")
-                        .IsUnique()
-                        .HasDatabaseName("IX_InvoiceCounters_TenantId_Year")
-                        .HasFilter("[IsDeleted] = 0");
-
-                    b.ToTable("InvoiceCounters", (string)null);
                 });
 
             modelBuilder.Entity("ISP.Domain.Entities.Notification", b =>
@@ -922,17 +877,6 @@ namespace ISP.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Subscriber");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ISP.Domain.Entities.InvoiceCounter", b =>
-                {
-                    b.HasOne("ISP.Domain.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });

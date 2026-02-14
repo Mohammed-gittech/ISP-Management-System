@@ -12,6 +12,10 @@ namespace ISP.Domain.Entities
         public string ContactEmail { get; set; } = string.Empty;
         public string? ContactPhone { get; set; }
 
+        public string? Address { get; set; }
+        public string? City { get; set; }
+        public string? Country { get; set; }
+
         public TenantPlan SubscriptionPlan { get; set; } = TenantPlan.Free;
         public int MaxSubscribers { get; set; } = 50;// Default للـ Free Plan
 

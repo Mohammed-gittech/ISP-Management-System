@@ -8,12 +8,14 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using ISP.Domain.Enums;
 using ISP.Application.DTOs.Invoices;
+using Microsoft.EntityFrameworkCore;
 
 
 namespace ISP.Infrastructure.Services
 {
     /// <summary>
     /// خدمة إدارة الدفعات
+    /// مع Database-safe sequential numbering
     /// </summary>
     public class PaymentService : IPaymentService
     {
@@ -21,7 +23,6 @@ namespace ISP.Infrastructure.Services
         private readonly IMapper _mapper;
         private readonly ICurrentTenantService _currentTenant;
         private readonly ILogger<PaymentService> _logger;
-        private readonly IInvoiceService _invoiceService;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
@@ -34,7 +35,6 @@ namespace ISP.Infrastructure.Services
             _mapper = mapper;
             _currentTenant = currentTenant;
             _logger = logger;
-            _invoiceService = invoiceService;
         }
 
         // ============================================
@@ -206,7 +206,7 @@ namespace ISP.Infrastructure.Services
                 TenantId = _currentTenant.TenantId,
                 SubscriberId = subscriber.Id,
                 PaymentId = payment.Id,
-                InvoiceNumber = await GenerateInvoiceNumberAsync(),
+                InvoiceNumber = await GenerateInvoiceNumberAsync(), // ⭐ Database-safe
                 Items = JsonSerializer.Serialize(items),
                 Subtotal = subtotal,
                 Tax = tax,
@@ -226,35 +226,71 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // Helper: Generate Invoice Number
+        // Helper: Generate Invoice Number (DATABASE-SAFE) ⭐⭐⭐
         // ============================================
 
         private async Task<string> GenerateInvoiceNumberAsync()
         {
-            // تنسيق: INV-YYYY-NNNNN
             var year = DateTime.UtcNow.Year;
-            var prefix = $"INV-{year}-";
+            var tenantId = _currentTenant.TenantId;
 
-            // جلب آخر فاتورة لهذا الـ Tenant في هذه السنة
-            var allInvoices = await _unitOfWork.Invoices.GetAllAsync();
-            var lastInvoice = allInvoices
-                .Where(i => i.InvoiceNumber.StartsWith(prefix))
-                .OrderByDescending(i => i.InvoiceNumber)
-                .FirstOrDefault();
+            // ============================================
+            // استخدام Database Transaction للأمان الكامل
+            // النسخة المبسطة - بدون using var
+            // ============================================
 
-            int nextNumber = 1;
-            if (lastInvoice != null)
+            await _unitOfWork.BeginTransactionAsync(); // ⭐ بدون using
+            try
             {
-                // استخراج الرقم من آخر فاتورة
-                var lastNumberStr = lastInvoice.InvoiceNumber.Replace(prefix, "");
-                if (int.TryParse(lastNumberStr, out int lastNumber))
-                {
-                    nextNumber = lastNumber + 1;
-                }
-            }
+                // ⭐ الخطوة 1: جلب/إنشاء العداد
+                var counter = await _unitOfWork.InvoiceCounters
+                    .GetAllAsync(c => c.TenantId == tenantId && c.Year == year)
+                    .ContinueWith(t => t.Result.FirstOrDefault());
 
-            return $"{prefix}{nextNumber:D5}"; // D5 = 5 digits مع أصفار
+                if (counter == null)
+                {
+                    // إنشاء عداد جديد
+                    counter = new InvoiceCounter
+                    {
+                        TenantId = tenantId,
+                        Year = year,
+                        LastNumber = 0,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    await _unitOfWork.InvoiceCounters.AddAsync(counter);
+                    await _unitOfWork.SaveChangesAsync();
+                }
+
+                // ⭐ الخطوة 2: زيادة العداد
+                counter.LastNumber++;
+                counter.UpdatedAt = DateTime.UtcNow;
+
+                await _unitOfWork.InvoiceCounters.UpdateAsync(counter);
+                await _unitOfWork.SaveChangesAsync();
+
+                // ⭐ الخطوة 3: Commit Transaction
+                await _unitOfWork.CommitTransactionAsync();
+
+                // توليد رقم الفاتورة
+                var invoiceNumber = $"INV-{year}-{counter.LastNumber:D5}";
+
+                _logger.LogInformation(
+                    "Generated invoice number: {InvoiceNumber} for Tenant {TenantId} (Counter: {LastNumber})",
+                    invoiceNumber, tenantId, counter.LastNumber);
+
+                return invoiceNumber;
+            }
+            catch (Exception ex)
+            {
+                // Rollback في حالة الخطأ
+                await _unitOfWork.RollbackTransactionAsync();
+                _logger.LogError(ex, "Error generating invoice number for Tenant {TenantId}", tenantId);
+                throw;
+            }
         }
+
 
         // ============================================
         // Payment Queries
@@ -374,7 +410,7 @@ namespace ISP.Infrastructure.Services
         {
             var payment = await _unitOfWork.Payments.GetByIdAsync(paymentId);
             if (payment == null)
-                throw new InvalidOperationException($"الدفعة برقم {paymentId} غير موجودة");
+                throw new InvalidOperationException($"الدفعة برقم {paymentId} غير موجود");
 
             if (payment.Status == "Refunded")
                 throw new InvalidOperationException("الدفعة مستردة مسبقاً");
