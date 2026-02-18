@@ -160,6 +160,11 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IInvoiceService, InvoiceService>();
 
 // ============================================
+// Reports & Analytics Service
+// ============================================
+builder.Services.AddScoped<IReportService, ReportService>();
+
+// ============================================
 // HttpContextAccessor (مطلوب للـ IP Address)
 // ============================================
 builder.Services.AddHttpContextAccessor();
