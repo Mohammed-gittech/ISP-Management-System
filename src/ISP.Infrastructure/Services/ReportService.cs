@@ -537,6 +537,7 @@ namespace ISP.Infrastructure.Services
                 ExpiringIn3Days = expiringIn3Days,
                 ExpiringIn7Days = expiringIn7Days,
                 AlreadyExpired = alreadyExpired,
+                PotentialRevenueLoss = potentialRevenueLoss,
                 Subscriptions = subscriptions
             };
         }
