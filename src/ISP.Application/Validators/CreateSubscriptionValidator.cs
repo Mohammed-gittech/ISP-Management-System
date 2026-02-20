@@ -17,7 +17,7 @@ namespace ISP.Application.Validators
             RuleFor(x => x.StartDate)
                 .NotEmpty()
                 .WithMessage("تاريخ البدء مطلوب")
-                .GreaterThanOrEqualTo(DateTime.UtcNow.Date)
+                .GreaterThanOrEqualTo(ـ => DateTime.UtcNow.Date)
                 .WithMessage("تاريخ البدء لا يمكن أن يكون في الماضي");
         }
     }

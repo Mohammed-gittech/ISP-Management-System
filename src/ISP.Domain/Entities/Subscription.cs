@@ -31,11 +31,12 @@ namespace ISP.Domain.Entities
             EndDate = StartDate.AddDays(Plan.DurationDays);
         }
 
-        public void UpdateStatus()
+        public void UpdateStatus(DateTime? referenceDate = null)
         {
-            var daysRemaining = (EndDate - DateTime.UtcNow).Days;
+            var now = referenceDate ?? DateTime.UtcNow;
+            var daysRemaining = (EndDate - now).Days;
 
-            if (daysRemaining < 0)
+            if (daysRemaining <= 0)
             {
                 Status = SubscriptionStatus.Expired;
             }
@@ -45,7 +46,6 @@ namespace ISP.Domain.Entities
             }
             else
                 Status = SubscriptionStatus.Active;
-
         }
     }
 }

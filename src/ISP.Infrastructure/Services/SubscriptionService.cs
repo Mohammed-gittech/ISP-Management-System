@@ -288,7 +288,7 @@ namespace ISP.Infrastructure.Services
 
             if (!subscription.IsDeleted)
             {
-                throw new InvalidOperationException("لا يمكن الحذف النهائي لاشتراك نشط. استخدم Cancel أولاً");
+                throw new InvalidOperationException(" أولاً Cancel لا يمكن الحذف النهائي لاشتراك نشط. استخدم ");
             }
 
             await _unitOfWork.Subscriptions.DeleteAsync(subscription);
