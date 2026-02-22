@@ -207,5 +207,61 @@ namespace ISP.API.Controllers
                 }
             });
         }
+
+        /// <summary>
+        /// طلب تجديد اشتراك الوكيل — TenantAdmin فقط
+        /// ينشئ طلب معلق ينتظر تأكيد SuperAdmin
+        /// </summary>
+        [HttpPost("{id}/renew-request")]
+        [Authorize(Roles = "TenantAdmin")]
+        public async Task<IActionResult> RenewRequest(int id, [FromBody] RenewTenantSubscriptionDto dto)
+        {
+            // Ownership Check: TenantAdmin يجدد اشتراكه فقط
+            var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
+            if (id != currentTenantId)
+                return Forbid();
+
+            var result = await _service.RenewRequestAsync(id, dto);
+
+            return Ok(new
+            {
+                success = true,
+                message = "تم إرسال طلب التجديد بنجاح — سيتم التواصل معك بعد تأكيد الدفع",
+                data = result
+            });
+        }
+
+        /// <summary>
+        /// تأكيد استلام الدفع وتفعيل الوكيل — SuperAdmin فقط
+        /// </summary>
+        [HttpPost("{id}/confirm-payment")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> ConfirmPayment(int id, [FromBody] ConfirmTenantPaymentDto dto)
+        {
+            await _service.ConfirmPaymentAsync(id, dto);
+
+            return Ok(new
+            {
+                success = true,
+                message = "تم تأكيد الدفع وتفعيل الحساب بنجاح"
+            });
+        }
+
+        /// <summary>
+        /// عرض كل الطلبات المعلقة — SuperAdmin فقط
+        /// لمعرفة من يحتاج تأكيد دفع
+        /// </summary>
+        [HttpGet("pending-renewals")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> GetPendingRenewals()
+        {
+            var result = await _service.GetPendingRenewalsAsync();
+
+            return Ok(new
+            {
+                success = true,
+                data = result
+            });
+        }
     }
 }

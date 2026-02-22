@@ -15,6 +15,8 @@ namespace ISP.Application.DTOs.Tenants
         public string? City { get; set; }
         public string? Country { get; set; }
 
+        public int DurationMonths { get; set; } = 1;
+
         public TenantPlan SubscriptionPlan { get; set; } = TenantPlan.Free;
         public String? TelegramBotToken { get; set; }
 

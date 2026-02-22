@@ -100,6 +100,11 @@ builder.Services.AddValidatorsFromAssemblyContaining<CreateSubscriptionValidator
 builder.Services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<UpdateSubscriberValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<CreateCashPaymentValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<CreateUserValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<UpdateUserValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<ChangePasswordValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<RenewTenantSubscriptionValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<ConfirmTenantPaymentValidator>();
 
 // ============================================
 // Repository & Unit of Work
@@ -144,9 +149,7 @@ builder.Services.AddScoped<IUserService, UserService>();
 // ============================================
 // Phase 3: Validators
 // ============================================
-builder.Services.AddValidatorsFromAssemblyContaining<CreateUserValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<UpdateUserValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<ChangePasswordValidator>();
+
 
 // ============================================
 // Phase 3: Audit Log Service

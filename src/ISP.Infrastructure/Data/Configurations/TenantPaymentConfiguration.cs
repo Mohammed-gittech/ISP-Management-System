@@ -34,7 +34,8 @@ namespace ISP.Infrastructure.Data.Configurations
 
             builder.Property(tp => tp.PaymentGateway)
                 .IsRequired()
-                .HasMaxLength(50);
+                .HasMaxLength(50)
+                .HasDefaultValue("Manual"); // ← افتراضي للدفع اليدوي;
 
             builder.Property(tp => tp.TransactionId)
                 .HasMaxLength(255);
@@ -83,12 +84,6 @@ namespace ISP.Infrastructure.Data.Configurations
 
             // Composite index
             builder.HasIndex(tp => new { tp.TenantId, tp.Status, tp.CreatedAt });
-
-            // ============================================
-            // Query Filter (Soft Delete)
-            // ============================================
-
-            builder.HasQueryFilter(tp => !tp.IsDeleted);
         }
     }
 }

@@ -31,6 +31,7 @@ namespace ISP.Application.Mappings
                 .ForMember(dest => dest.CurrentSubscribers, opt => opt.MapFrom(src => src.Subscribers.Count))
                 .ForMember(dest => dest.HasTelegramBot, opt => opt.MapFrom(src => !string.IsNullOrEmpty(src.TelegramBotToken)));
 
+            CreateMap<TenantSubscription, TenantSubscriptionDto>();
 
             // ============================================
             // Subscriber Mappings

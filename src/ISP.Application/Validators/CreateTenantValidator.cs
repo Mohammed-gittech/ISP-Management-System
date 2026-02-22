@@ -3,6 +3,7 @@
 // ============================================
 using ISP.Application.DTOs.Tenants;
 using FluentValidation;
+using ISP.Domain.Enums;
 
 namespace ISP.Application.Validators
 {
@@ -21,6 +22,19 @@ namespace ISP.Application.Validators
 
             RuleFor(x => x.ContactPhone)
                 .MaximumLength(20).When(x => !string.IsNullOrEmpty(x.ContactPhone));
+
+            RuleFor(x => x.DurationMonths)
+                .Equal(1)
+                .When(x => x.SubscriptionPlan == TenantPlan.Free)
+                .WithMessage("الباقة المجانية شهر واحد فقط");
+
+            RuleFor(x => x.DurationMonths)
+                .GreaterThan(0)
+                .When(x => x.SubscriptionPlan != TenantPlan.Free)
+                .WithMessage("المدة يجب أن تكون شهر واحد على الأقل")
+                .LessThanOrEqualTo(12)
+                .When(x => x.SubscriptionPlan != TenantPlan.Free)
+                .WithMessage("المدة لا يمكن أن تتجاوز 12 شهراً");
 
             RuleFor(x => x.AdminUsername)
                 .NotEmpty().WithMessage("اسم مستخدم المسؤول مطلوب")

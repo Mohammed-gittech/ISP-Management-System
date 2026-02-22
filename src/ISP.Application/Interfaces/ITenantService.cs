@@ -14,5 +14,27 @@ namespace ISP.Application.Interfaces
         Task<bool> ActivateAsync(int id);
         Task<int> GetCurrentSubscribersCountAsync(int tenantId);
         Task<bool> CanAddSubscriberAsync(int tenantId);
+
+        // ============================================
+        // Subscription Renewal & Payment
+        // ============================================
+
+        /// <summary>
+        /// TenantAdmin يطلب تجديد اشتراكه
+        /// ينشئ TenantSubscription بـ Status = Pending
+        /// </summary>
+        Task<TenantSubscriptionDto> RenewRequestAsync(int tenantId, RenewTenantSubscriptionDto dto);
+
+        /// <summary>
+        /// SuperAdmin يؤكد استلام الدفع ويُفعِّل الـ Tenant
+        /// ينشئ TenantPayment ويحدث TenantSubscription
+        /// </summary>
+        Task ConfirmPaymentAsync(int tenantId, ConfirmTenantPaymentDto dto);
+
+        /// <summary>
+        /// SuperAdmin يرى كل الطلبات المعلقة
+        /// لمعرفة من يحتاج تأكيد دفع
+        /// </summary>
+        Task<IEnumerable<TenantSubscriptionDto>> GetPendingRenewalsAsync();
     }
 }

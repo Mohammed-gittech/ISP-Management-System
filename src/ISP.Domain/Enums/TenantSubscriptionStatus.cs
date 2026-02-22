@@ -5,8 +5,9 @@ namespace ISP.Domain.Enums
 {
     public enum TenantSubscriptionStatus
     {
-        Active = 0,      // نشط
-        Expired = 1,     // منتهي
-        Suspended = 2    // معلق (عدم دفع)
+        Pending = 0,     // ينتظر الدفع
+        Active = 1,      // نشط
+        Expired = 2,     // منتهي
+        Suspended = 3    // معلق (عدم دفع)
     }
 }
