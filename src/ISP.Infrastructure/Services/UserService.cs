@@ -205,7 +205,7 @@ namespace ISP.Infrastructure.Services
             }
 
             // منع حذف المستخدم الحالي
-            if (_currentTenantService.UserId == id)
+            if (_currentTenantService.UserId.HasValue && _currentTenantService.UserId == id)
             {
                 throw new InvalidOperationException("لا يمكنك حذف نفسك");
             }
@@ -235,7 +235,7 @@ namespace ISP.Infrastructure.Services
                 return false;
 
             // التحقق من تفرّد Email/Username (قبل الاسترجاع)
-            var existingEmail = await _unitOfWork.Users.GetAllAsync(u => u.Email == user.Email);
+            var existingEmail = await _unitOfWork.Users.GetAllAsync(u => u.Email == user.Email && u.TenantId == user.TenantId);
             if (existingEmail.Any())
             {
                 throw new InvalidOperationException(
