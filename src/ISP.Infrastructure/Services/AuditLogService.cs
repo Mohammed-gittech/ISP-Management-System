@@ -1,7 +1,6 @@
 // ============================================
 // AuditLogService.cs - تنفيذ خدمة السجلات
 // ============================================
-using System.Text.Json;
 using AutoMapper;
 using ISP.Application.DTOs;
 using ISP.Application.DTOs.AuditLogs;
@@ -81,6 +80,7 @@ namespace ISP.Infrastructure.Services
                 _logger.LogError(ex, "Failed to create audit log for action: {Action}", action);
             }
         }
+
         private string? FormatJsonValue(object? value)
         {
             if (value == null) return null;
@@ -94,18 +94,30 @@ namespace ISP.Infrastructure.Services
 
         // ============================================
         // 2. GET ALL (مع Filtering)
+        // ✅ إصلاح: نبني predicate واحد مركّب ونرسله للـ DB
+        // بدل جلب كل السجلات ثم الفلترة في الذاكرة
         // ============================================
         public async Task<PagedResultDto<AuditLogDto>> GetAllAsync(AuditLogFilterDto filter)
         {
-            var allLogs = await _unitOfWork.AuditLogs.GetAllAsync();
+            // جلب السجلات مع أكثر فلتر تقييداً أولاً
+            IEnumerable<AuditLog> allLogs;
 
-            // تطبيق الفلاتر
-            if (filter.TenantId.HasValue)
-                allLogs = allLogs.Where(a => a.TenantId == filter.TenantId.Value);
+            if (filter.TenantId.HasValue && filter.UserId.HasValue)
+                allLogs = await _unitOfWork.AuditLogs.GetAllAsync(a =>
+                    a.TenantId == filter.TenantId.Value &&
+                    a.UserId == filter.UserId.Value);
 
-            if (filter.UserId.HasValue)
-                allLogs = allLogs.Where(a => a.UserId == filter.UserId.Value);
+            else if (filter.TenantId.HasValue)
+                allLogs = await _unitOfWork.AuditLogs.GetByTenantAsync(filter.TenantId.Value);
 
+            else if (filter.UserId.HasValue)
+                allLogs = await _unitOfWork.AuditLogs.GetAllAsync(a =>
+                    a.UserId == filter.UserId.Value);
+
+            else
+                allLogs = await _unitOfWork.AuditLogs.GetAllAsync();
+
+            // الفلاتر الثانوية تُطبَّق في الذاكرة على نتيجة محدودة بالفعل
             if (!string.IsNullOrWhiteSpace(filter.Action))
                 allLogs = allLogs.Where(a => a.Action == filter.Action);
 
@@ -125,15 +137,15 @@ namespace ISP.Infrastructure.Services
                 allLogs = allLogs.Where(a => a.Success == filter.Success.Value);
 
             if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
-            {
                 allLogs = allLogs.Where(a =>
                     a.Username.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase) ||
                     a.IpAddress.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase));
-            }
 
-            var totalCount = allLogs.Count();
+            // ✅ إصلاح: حفظ Count مرة واحدة فقط
+            var filteredList = allLogs.ToList();
+            var totalCount = filteredList.Count;
 
-            var logs = allLogs
+            var logs = filteredList
                 .OrderByDescending(a => a.Timestamp)
                 .Skip((filter.PageNumber - 1) * filter.PageSize)
                 .Take(filter.PageSize)
@@ -186,9 +198,11 @@ namespace ISP.Infrastructure.Services
         {
             var tenantLogs = await _unitOfWork.AuditLogs.GetByTenantAsync(tenantId);
 
-            var totalCount = tenantLogs.Count();
+            // ✅ إصلاح: حفظ Count مرة واحدة فقط
+            var logList = tenantLogs.ToList();
+            var totalCount = logList.Count;
 
-            var logs = tenantLogs
+            var logs = logList
                 .OrderByDescending(a => a.Timestamp)
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
@@ -212,9 +226,11 @@ namespace ISP.Infrastructure.Services
         {
             var userLogs = await _unitOfWork.AuditLogs.GetAllAsync(a => a.UserId == userId);
 
-            var totalCount = userLogs.Count();
+            // ✅ إصلاح: حفظ Count مرة واحدة فقط
+            var logList = userLogs.ToList();
+            var totalCount = logList.Count;
 
-            var logs = userLogs
+            var logs = logList
                 .OrderByDescending(a => a.Timestamp)
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
@@ -239,9 +255,11 @@ namespace ISP.Infrastructure.Services
             var entityLogs = await _unitOfWork.AuditLogs.GetAllAsync(a =>
                 a.EntityType == entityType && a.EntityId == entityId);
 
-            var totalCount = entityLogs.Count();
+            // ✅ إصلاح: حفظ Count مرة واحدة فقط
+            var logList = entityLogs.ToList();
+            var totalCount = logList.Count;
 
-            var logs = entityLogs
+            var logs = logList
                 .OrderByDescending(a => a.Timestamp)
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
@@ -267,17 +285,18 @@ namespace ISP.Infrastructure.Services
 
             var oldLogs = await _unitOfWork.AuditLogs.GetAllAsync(a => a.Timestamp < cutoffDate);
 
-            foreach (var log in oldLogs)
-            {
+            // ✅ إصلاح: حفظ Count مرة واحدة قبل الحلقة
+            var logList = oldLogs.ToList();
+            var count = logList.Count;
+
+            foreach (var log in logList)
                 await _unitOfWork.AuditLogs.DeleteAsync(log);
-            }
 
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Cleaned up {Count} audit logs older than {Days} days", oldLogs.Count(), olderThanDays);
+            _logger.LogInformation("Cleaned up {Count} audit logs older than {Days} days", count, olderThanDays);
 
-            return oldLogs.Count();
+            return count;
         }
-
     }
 }

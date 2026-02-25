@@ -3,8 +3,15 @@
 // ============================================
 namespace ISP.Domain.Entities
 {
-    public class AuditLog : BaseEntity
+    /// <summary>
+    /// سجل التدقيق — لا يرث من BaseEntity عمداً
+    /// لأن سجلات الـ Audit يجب أن لا تخضع للـ Soft Delete أبداً
+    /// هي سجل قانوني لا يُحذف بشكل خفي
+    /// </summary>
+    public class AuditLog
     {
+        public int Id { get; set; }
+
         // Multi-Tenant Support
         public int? TenantId { get; set; }
         public Tenant? Tenant { get; set; }

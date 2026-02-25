@@ -3,21 +3,18 @@
 // Fake implementation of ICurrentTenantService
 // Used only in Integration Tests
 // ============================================
-// Why: The real CurrentTenantService depends on
-// IHttpContextAccessor which doesn't exist in tests.
-// This Fake gives us full control over TenantId.
-// ============================================
 using ISP.Application.Interfaces;
 
 namespace ISP.Tests.Helpers
 {
     public class FakeTenantService : ICurrentTenantService
     {
-        // نخزن TenantId و IsSuperAdmin مباشرة بدون HttpContext
         private int? _tenantId;
         private bool _isSuperAdmin;
+        private int? _userId;
+        private string? _username;
 
-        // Constructor يقبل TenantId مباشرة
+        // Constructor للـ Tenant عادي
         public FakeTenantService(int tenantId)
         {
             _tenantId = tenantId;
@@ -31,6 +28,16 @@ namespace ISP.Tests.Helpers
             _tenantId = null;
         }
 
+        // ✅ Constructor جديد — يقبل TenantId و UserId و Username معاً
+        // يُستخدم في AuditLog Tests التي تحتاج Username في السجل
+        public FakeTenantService(int tenantId, int userId, string username)
+        {
+            _tenantId = tenantId;
+            _isSuperAdmin = false;
+            _userId = userId;
+            _username = username;
+        }
+
         // ============================================
         // ICurrentTenantService Implementation
         // ============================================
@@ -42,9 +49,9 @@ namespace ISP.Tests.Helpers
 
         public bool HasTenant => _tenantId != null;
 
-        // لا نحتاجهما في الاختبارات
-        public int? UserId => null;
-        public string? Username => null;
+        public int? UserId => _userId;
+
+        public string? Username => _username;
 
         public void SetTenant(int tenantId)
         {
