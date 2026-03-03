@@ -23,10 +23,13 @@ namespace ISP.Domain.Interfaces
         IRepository<Payment> Payments { get; }
         IRepository<Invoice> Invoices { get; }
         IRepository<TenantPayment> TenantPayments { get; }
-        IRepository<InvoiceCounter> InvoiceCounters { get; } // ⭐ NEW
+        IRepository<InvoiceCounter> InvoiceCounters { get; }
+
+        // RefreshTokens
+        IRepository<RefreshToken> RefreshTokens { get; }
 
         // ============================================
-        // Transaction Methods ⭐ NEW
+        // Transaction Methods 
         // ============================================
 
         /// <summary>

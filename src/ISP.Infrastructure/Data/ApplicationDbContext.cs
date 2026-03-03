@@ -40,7 +40,10 @@ namespace ISP.Infrastructure.Data
         public DbSet<Invoice> Invoices => Set<Invoice>();
         public DbSet<Payment> Payments => Set<Payment>();
         public DbSet<TenantPayment> TenantPayments => Set<TenantPayment>();
-        public DbSet<InvoiceCounter> InvoiceCounters => Set<InvoiceCounter>(); // ⭐ NEW
+        public DbSet<InvoiceCounter> InvoiceCounters => Set<InvoiceCounter>();
+
+        // Refresh Token
+        public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
         // ============================================
         // OnModelCreating - تكوين Model

@@ -33,7 +33,10 @@ namespace ISP.Infrastructure.Repositories
         private IRepository<Payment>? _payments;
         private IRepository<Invoice>? _invoices;
         private IRepository<TenantPayment>? _tenantPayments;
-        private IRepository<InvoiceCounter>? _invoiceCounters; // ⭐ NEW
+        private IRepository<InvoiceCounter>? _invoiceCounters;
+
+        // Refresh Token
+        private IRepository<RefreshToken>? _refreshTokens;
 
         public UnitOfWork(
             ApplicationDbContext context,
@@ -81,12 +84,16 @@ namespace ISP.Infrastructure.Repositories
         public IRepository<TenantPayment> TenantPayments =>
             _tenantPayments ??= new GenericRepository<TenantPayment>(_context, _currentTenantService);
 
-        // ⭐ NEW: InvoiceCounter Repository
+        // InvoiceCounter Repository
         public IRepository<InvoiceCounter> InvoiceCounters =>
             _invoiceCounters ??= new GenericRepository<InvoiceCounter>(_context, _currentTenantService);
 
+        // Refresh Token
+        public IRepository<RefreshToken> RefreshTokens =>
+            _refreshTokens ??= new GenericRepository<RefreshToken>(_context, _currentTenantService);
+
         // ============================================
-        // Transaction Methods ⭐ NEW
+        // Transaction Methods 
         // ============================================
 
         /// <summary>
