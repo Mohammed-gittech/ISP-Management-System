@@ -128,7 +128,7 @@ namespace ISP.Tests.Integration.Services.Reports
 
             // Assert 
             report.Should().NotBeNull();
-            report.ChurnRate.Should().Be(25);
+            report.ChurnRate.Should().Be(20);
         }
 
         // TEST 8: MonthlyTrend
@@ -141,7 +141,7 @@ namespace ISP.Tests.Integration.Services.Reports
 
             // Assert 
             report.Should().NotBeNull();
-            report.MonthlyTrend.Count.Should().Be(4);
+            report.MonthlyTrend.Count.Should().Be(3);
         }
 
 

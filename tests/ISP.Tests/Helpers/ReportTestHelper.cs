@@ -170,7 +170,7 @@ namespace ISP.Tests.Helpers
                 Status = SubscriberStatus.Active,
                 RegistrationDate = DateTime.UtcNow.AddDays(-15), // جديد (شهر حالي)
                 IsDeleted = true,
-                DeletedAt = DateTime.UtcNow.AddDays(-5)
+                DeletedAt = DateTime.UtcNow.AddDays(-2) // في الشهر الحالي للـ Churned Test // في الشهر الحالي للـ Churned Test
             };
             var now = DateTime.UtcNow;
             var startOfMonth = new DateTime(now.Year, now.Month, 1);
@@ -183,7 +183,7 @@ namespace ISP.Tests.Helpers
                 FullName = "زينب أحمد",
                 PhoneNumber = "07806666666",
                 Status = SubscriberStatus.Active,
-                RegistrationDate = startOfMonth.AddDays(5) // في الشهر الحالي ✅
+                RegistrationDate = startOfMonth.AddDays(4) // في الشهر الحالي ✅
             };
 
             // Tenant 2 Subscribers (Multi-Tenancy Test)
@@ -288,7 +288,7 @@ namespace ISP.Tests.Helpers
                 StartDate = startOfMonth.AddDays(10), // جديد في الشهر الحالي
                 EndDate = startOfMonth.AddDays(70),
                 Status = SubscriptionStatus.Active,
-                CreatedAt = startOfMonth.AddDays(10)
+                CreatedAt = startOfMonth.AddDays(4) // في الشهر الحالي، قبل التاريخ الحالي
             });
 
             // Tenant 2 Subscription (Multi-Tenancy)
@@ -320,8 +320,8 @@ namespace ISP.Tests.Helpers
                 Discount = 0,
                 Total = 20000,
                 Status = "Paid",
-                IssuedDate = startOfMonth.AddDays(5),
-                PaidDate = startOfMonth.AddDays(7)
+                IssuedDate = startOfMonth.AddDays(1), // في الشهر الحالي
+                PaidDate = startOfMonth.AddDays(3)
             };
 
             var payment1 = new Payment
@@ -334,8 +334,8 @@ namespace ISP.Tests.Helpers
                 Amount = 20000,
                 PaymentMethod = "Cash",
                 Status = "Completed",
-                PaidAt = startOfMonth.AddDays(7),
-                CreatedAt = startOfMonth.AddDays(7)
+                PaidAt = startOfMonth.AddDays(3), // مطابق لـ PaidDate
+                CreatedAt = startOfMonth.AddDays(3)
             };
 
             invoice1.PaymentId = 1;
@@ -350,8 +350,8 @@ namespace ISP.Tests.Helpers
                 Subtotal = 20000,
                 Total = 20000,
                 Status = "Paid",
-                IssuedDate = startOfMonth.AddDays(10),
-                PaidDate = startOfMonth.AddDays(12)
+                IssuedDate = startOfMonth.AddDays(2), // في الشهر الحالي
+                PaidDate = startOfMonth.AddDays(4)
             };
 
             var payment2 = new Payment
@@ -364,7 +364,7 @@ namespace ISP.Tests.Helpers
                 Amount = 20000,
                 PaymentMethod = "Cash",
                 Status = "Completed",
-                PaidAt = startOfMonth.AddDays(12)
+                PaidAt = startOfMonth.AddDays(4)
             };
 
             invoice2.PaymentId = 2;
@@ -379,8 +379,8 @@ namespace ISP.Tests.Helpers
                 Subtotal = 15000,
                 Total = 15000,
                 Status = "Paid",
-                IssuedDate = startOfMonth.AddDays(15),
-                PaidDate = startOfMonth.AddDays(17)
+                IssuedDate = startOfMonth.AddDays(3), // في الشهر الحالي
+                PaidDate = startOfMonth.AddDays(5)
             };
 
             var payment3 = new Payment
@@ -393,7 +393,7 @@ namespace ISP.Tests.Helpers
                 Amount = 15000,
                 PaymentMethod = "Online",
                 Status = "Completed",
-                PaidAt = startOfMonth.AddDays(17)
+                PaidAt = startOfMonth.AddDays(5)
             };
 
             invoice3.PaymentId = 3;

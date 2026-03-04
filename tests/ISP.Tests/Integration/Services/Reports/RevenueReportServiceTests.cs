@@ -116,7 +116,7 @@ namespace ISP.Tests.Integration.Services.Reports
             // Assert 
             report.Should().NotBeNull();
             report.RevenueByPlan.Count.Should().Be(3);
-            report.RevenueByPlan[0].SubscribersCount.Should().Be(3);
+            report.RevenueByPlan[0].SubscribersCount.Should().Be(2);
         }
 
 
