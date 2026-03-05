@@ -64,10 +64,18 @@ namespace ISP.Infrastructure.BackgroundJobs
                     _logger.LogInformation("User cleanup is disabled in configuration");
                 }
 
-                // 6. تقرير نهائي
+                // 6. Refresh Tokens cleanup (if applicable)
+                var refreshTokensDeleted = await CleanupRefreshTokensAsync();
+
+                // 7. تقرير نهائي
                 _logger.LogInformation("=== Retention Cleanup Completed ===");
-                _logger.LogInformation("Deleted: {Subscribers} Subscribers, {Plans} Plans, {Subscriptions} Subscriptions, {Users} Users",
-                    subscribersDeleted, plansDeleted, subscriptionsDeleted, usersDeleted);
+                _logger.LogInformation(
+                    "Deleted: {Subscribers} Subscribers, {Plans} Plans, " +
+                    "{Subscriptions} Subscriptions, {Users} Users, " +
+                    "{RefreshTokens} RefreshTokens",
+                    subscribersDeleted, plansDeleted,
+                    subscriptionsDeleted, usersDeleted,
+                    refreshTokensDeleted);
             }
             catch (Exception ex)
             {
@@ -197,6 +205,102 @@ namespace ISP.Infrastructure.BackgroundJobs
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error cleaning up Users");
+                return 0;
+            }
+        }
+
+        // ============================================
+        // Cleanup RefreshTokens ← جديد
+        // ============================================
+
+        /// <summary>
+        /// حذف RefreshTokens المنتهية والمُلغاة القديمة
+        ///
+        /// يحذف توكناً إذا تحقق أحد الشرطين:
+        ///
+        ///   الشرط 1 — منتهٍ منذ أكثر من 90 يوم:
+        ///     ExpiresAt < (UtcNow - 90 يوم)
+        ///     مثال: لو اليوم 15 مارس، يُحذف كل توكن انتهى قبل 14 ديسمبر
+        ///
+        ///   الشرط 2 — مُلغى منذ أكثر من 90 يوم:
+        ///     IsRevoked = true AND RevokedAt < (UtcNow - 90 يوم)
+        ///     مثال: كل توكن أُلغي قبل 14 ديسمبر يُحذف الآن
+        ///
+        /// لماذا 90 يوم للاثنين؟
+        ///   نافذة تحقيق كافية لو اكتشفنا اختراقاً بعد شهرين
+        ///   يبقى التوكن في DB ونعرف من استخدمه ومتى
+        ///   بعد 90 يوم لا قيمة أمنية له
+        /// </summary>
+        private async Task<int> CleanupRefreshTokensAsync()
+        {
+            _logger.LogInformation("Cleaning up expired and revoked RefreshTokens...");
+
+            try
+            {
+                // قراءة Retention من Configuration
+                // القيمة الافتراضية 90 يوم للاثنين
+                var expiredRetentionDays = _configuration
+                    .GetValue<int>("RefreshTokens:ExpiredRetentionDays", 90);
+                // كم يوم نحتفظ بالتوكن بعد انتهاء صلاحيته
+
+                var revokedRetentionDays = _configuration
+                    .GetValue<int>("RefreshTokens:RevokedRetentionDays", 90);
+                // كم يوم نحتفظ بالتوكن بعد إلغائه
+
+                var expiredCutoffDate = DateTime.UtcNow.AddDays(-expiredRetentionDays);
+                // التوكنات التي انتهت قبل هذا التاريخ → تُحذف
+
+                var revokedCutoffDate = DateTime.UtcNow.AddDays(-revokedRetentionDays);
+                // التوكنات التي أُلغيت قبل هذا التاريخ → تُحذف
+
+                _logger.LogInformation(
+                    "RefreshToken Cleanup | " +
+                    "Expired cutoff: {ExpiredDate} | " +
+                    "Revoked cutoff: {RevokedDate}",
+                    expiredCutoffDate.ToString("yyyy-MM-dd"),
+                    revokedCutoffDate.ToString("yyyy-MM-dd"));
+
+                // جلب كل الـ RefreshTokens بما فيها المُلغاة
+                var allTokens = await _unitOfWork.RefreshTokens
+                    .GetAllIncludingDeletedAsync();
+
+                // فلترة التوكنات المراد حذفها
+                var tokensToDelete = allTokens
+                    .Where(t =>
+                        (!t.IsRevoked && t.ExpiresAt < expiredCutoffDate)
+                        ||
+                        (t.IsRevoked && t.RevokedAt.HasValue && t.RevokedAt.Value < revokedCutoffDate)
+                    )
+                    .ToList();
+
+                _logger.LogInformation(
+                    "Found {Count} RefreshTokens to delete",
+                    tokensToDelete.Count);
+
+                if (tokensToDelete.Count == 0)
+                {
+                    _logger.LogInformation("No RefreshTokens to clean up");
+                    return 0;
+                }
+
+                // حذف نهائي لكل توكن
+                foreach (var token in tokensToDelete)
+                {
+                    await _unitOfWork.RefreshTokens.DeleteAsync(token);
+                }
+
+
+                await _unitOfWork.SaveChangesAsync();
+
+                _logger.LogWarning(
+                    "Permanently deleted {Count} RefreshTokens",
+                    tokensToDelete.Count);
+
+                return tokensToDelete.Count;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error cleaning up RefreshTokens");
                 return 0;
             }
         }
