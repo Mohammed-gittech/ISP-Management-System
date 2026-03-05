@@ -35,4 +35,3 @@ A Multi-Tenant ISP Management RESTful API built with ASP.NET Core 8.
 - xUnit
 - FluentValidation
 
-⚠️ Project is under active development (80% complete).
