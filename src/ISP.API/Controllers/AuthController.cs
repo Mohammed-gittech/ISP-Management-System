@@ -2,6 +2,7 @@ using ISP.Application.DTOs.Auth;
 using ISP.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace ISP.API.Controllers
 {
@@ -24,6 +25,11 @@ namespace ISP.API.Controllers
         /// </summary>
         /// <param name="request">Email + Password</param>
         /// <returns>JWT Token + User Info</returns>
+        [EnableRateLimiting("AuthPolicy")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
         {
@@ -65,6 +71,11 @@ namespace ISP.API.Controllers
         /// <summary>
         /// Refresh Token باستخدام Access Token تجديد
         /// </summary>
+        [EnableRateLimiting("AuthPolicy")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
         [HttpPost("refresh")]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequestDto request)
         {
@@ -103,6 +114,10 @@ namespace ISP.API.Controllers
         /// <summary>
         /// Refresh Token تسجيل الخروج — إلغاء 
         /// </summary>
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [HttpPost("revoke")]
         [Authorize]
         public async Task<IActionResult> RevokeToken([FromBody] RefreshTokenRequestDto request)

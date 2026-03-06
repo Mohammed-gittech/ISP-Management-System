@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Hangfire;
@@ -18,6 +19,7 @@ using ISP.Infrastructure.Services;
 using ISP.Infrastructure.Services.Notifications;
 using ISP.Infrastructure.Services.Telegram;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -82,6 +84,59 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+
+// ============================================
+// Rate Limiting ← جديد
+// ============================================
+builder.Services.AddRateLimiter(options =>
+{
+    // AuthPolicy
+    options.AddSlidingWindowLimiter("AuthPolicy", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = builder.Configuration
+            .GetValue<int>("RateLimiting:Auth:PermitLimit", 5);
+
+        limiterOptions.Window = TimeSpan.FromSeconds(
+            builder.Configuration.GetValue<int>("RateLimiting:Auth:WindowSeconds", 60));
+
+        limiterOptions.SegmentsPerWindow = 6;
+
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
+
+    // GlobalPolicy
+    options.AddFixedWindowLimiter("GlobalPolicy", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = builder.Configuration
+            .GetValue<int>("RateLimiting:Global:PermitLimit", 100);
+
+        limiterOptions.Window = TimeSpan.FromSeconds(
+            builder.Configuration.GetValue<int>("RateLimiting:Global:WindowSeconds", 60));
+
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
+
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        // 429 = Too Many Requests
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter =
+                ((int)retryAfter.TotalSeconds).ToString();
+        }
+
+        // Client رسالة واضحة للـ 
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            "{\"message\": \"لقد تجاوزت الحد المسموح به من الطلبات. حاول مجدداً لاحقاً.\"}",
+            cancellationToken);
+    };
+});
+
 
 // ============================================
 // AutoMapper
@@ -173,7 +228,7 @@ builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+
 builder.Services.AddEndpointsApiExplorer();
 // Register Swagger generator and customize its behavior.
 builder.Services.AddSwaggerGen(options =>
@@ -266,15 +321,16 @@ if (app.Environment.IsDevelopment())
 // 3. HTTPS Redirection
 app.UseHttpsRedirection();
 
-// 4. Authentication
+// 4. Rate Limiting
+app.UseRateLimiter();
+
+// 5. Authentication
 app.UseAuthentication(); // ← قبل Authorization
 
-// 5. Tenant Resolver (بعد Authentication)
+// 6. Tenant Resolver (بعد Authentication)
 app.UseTenantResolver();
 
-// ============================================
-// Phase 3: Audit Logging Middleware
-// ============================================
+// 7. Audit Logging
 app.UseAuditLogging();
 
 app.UseAuthorization();
