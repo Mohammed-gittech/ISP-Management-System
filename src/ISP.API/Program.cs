@@ -86,6 +86,42 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 
 // ============================================
+// CORS Policy
+// ============================================
+
+builder.Services.AddCors(options =>
+{
+    // ============================
+    // السياسة الأولى — DevelopmentPolicy
+    // ============================
+    options.AddPolicy("DevelopmentPolicy", policy =>
+    {
+        policy
+        .WithOrigins("http://localhost:3000", "http://localhost:8080") // WithOrigins = حدد العناوين المسموح لها
+        .AllowAnyMethod()  // AllowAnyMethod = اسمح لكل HTTP Methods
+        .AllowAnyHeader() // AllowAnyHeader = اسمح لكل Headers
+        .AllowCredentials(); // AllowCredentials = اسمح بإرسال Authorization Headers
+    });
+
+    // ============================
+    // السياسة الثانية — ProductionPolicy
+    // ============================
+    options.AddPolicy("ProductionPolicy", policy =>
+    {
+        var allowedOrigins = builder.Configuration
+            .GetSection("Cors:AllowedOrigins")
+            .Get<string[]>() ?? [];
+
+        policy
+        .WithOrigins(allowedOrigins)
+        .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH")
+        .WithHeaders("Content-Type", "Authorization", "X-Tenant-Id")
+        .AllowCredentials();
+    });
+});
+
+
+// ============================================
 // Rate Limiting ← جديد
 // ============================================
 builder.Services.AddRateLimiter(options =>
@@ -321,16 +357,21 @@ if (app.Environment.IsDevelopment())
 // 3. HTTPS Redirection
 app.UseHttpsRedirection();
 
-// 4. Rate Limiting
+// 4. CORS
+app.UseCors(app.Environment.IsDevelopment()
+    ? "DevelopmentPolicy"  // في بيئة التطوير → سياسة مخففة
+    : "ProductionPolicy"); // في بيئة الإنتاج → سياسة صارمة
+
+// 5. Rate Limiting
 app.UseRateLimiter();
 
-// 5. Authentication
+// 6. Authentication
 app.UseAuthentication(); // ← قبل Authorization
 
-// 6. Tenant Resolver (بعد Authentication)
+// 7. Tenant Resolver (بعد Authentication)
 app.UseTenantResolver();
 
-// 7. Audit Logging
+// 8. Audit Logging
 app.UseAuditLogging();
 
 app.UseAuthorization();
