@@ -61,6 +61,24 @@ namespace ISP.Infrastructure.Data.Configurations
                 .HasForeignKey(u => u.TenantId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired(false); // TenantId can be null for SuperAdmin
+
+            // Account Lockout 
+            builder.Property(u => u.FailedLoginAttempts)
+                .IsRequired()
+                .HasDefaultValue(0);
+
+            builder.Property(u => u.LockoutEnd)
+                .IsRequired(false);
+
+            builder.Property(u => u.LastFailedLoginAt)
+                .IsRequired(false);
+
+            builder.Ignore(u => u.IsLockedOut);
+            builder.Ignore(u => u.LockoutRemainingMinutes);
+
+            builder.HasIndex(u => u.LockoutEnd)
+            .HasDatabaseName("IX_Users_LockoutEnd");
+
         }
     }
 }

@@ -3,6 +3,7 @@ using ISP.Application.DTOs.Auth;
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Interfaces;
+using Microsoft.Extensions.Configuration;
 
 namespace ISP.Infrastructure.Services
 {
@@ -14,18 +15,23 @@ namespace ISP.Infrastructure.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly IPasswordHasher _passwordHasher;
         private readonly IJwtTokenService _jwtTokenService;
-
-        private const int RefreshTokenExpiryDays = 7;
+        private readonly IConfiguration _configuration;
 
         public AuthService(
             IUnitOfWork unitOfWork,
             IPasswordHasher passwordHasher,
-            IJwtTokenService jwtTokenService)
+            IJwtTokenService jwtTokenService,
+            IConfiguration configuration)
         {
             _unitOfWork = unitOfWork;
             _passwordHasher = passwordHasher;
             _jwtTokenService = jwtTokenService;
+            _configuration = configuration;
         }
+
+        private const int RefreshTokenExpiryDays = 7;
+        private int AccessTokenExpiresMinutes =>
+            _configuration.GetValue<int>("JWT:AccessTokenExpiresMinutes", 15);
 
         /// <summary>
         /// تسجيل الدخول
@@ -39,15 +45,29 @@ namespace ISP.Infrastructure.Services
             if (user == null)
                 return null;
 
-            // 2. التحقق من كلمة المرور
-            if (!_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
-                return null;
+            // 2. هل الحساب مقفول؟
+            if (user.IsLockedOut)
+            {
+                // throw new UnauthorizedAccessException(
+                //     $"  .دقيقة {user.LockoutRemainingMinutes} الحساب مقفول بسبب محاولات تسجيل دخول متعددة. حاول مجدداً بعد" +
+                //     $" ");
+                throw new UnauthorizedAccessException(
+                    $"الحساب مقفول بسبب محاولات تسجيل دخول متعددة. حاول مجدداً بعد {user.LockoutRemainingMinutes} دقيقة.");
 
-            // 3. التحقق من أن الحساب نشط
+            }
+            // 3. التحقق من كلمة المرور
+            if (!_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
+            {
+                await HandleFailedLoginAsync(user);
+                return null;
+            }
+
+
+            // 4. التحقق من أن الحساب نشط
             if (!user.IsActive)
                 throw new UnauthorizedAccessException("الحساب معطّل");
 
-            // 4. التحقق من أن Tenant نشط (إذا لم يكن SuperAdmin)
+            // 5. التحقق من أن Tenant نشط (إذا لم يكن SuperAdmin)
             if (user.TenantId.HasValue)
             {
                 var tenant = await _unitOfWork.Tenants.GetByIdAsync(user.TenantId.Value);
@@ -55,10 +75,13 @@ namespace ISP.Infrastructure.Services
                     throw new UnauthorizedAccessException("حساب الوكيل معطّل");
             }
 
-            // 5. توليد Access Token
+            // 6. كلمة المرور صحيحة — صفِّر العداد
+            await ResetLockoutAsync(user);
+
+            // 7. توليد Access Token
             var accessToken = _jwtTokenService.GenerateToken(user);
 
-            // 6. Refresh Token
+            // 8. Refresh Token
             var refreshToken = await CreateRefreshTokenAsync(user.Id);
 
             await _unitOfWork.SaveChangesAsync();
@@ -67,8 +90,7 @@ namespace ISP.Infrastructure.Services
             {
                 Token = accessToken,
                 RefreshToken = refreshToken.Token,
-                AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(15),
-                // TODO: في المستقبل هذه القيمة تُقرأ من appsettings AccessTokenExpiresAt
+                AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(AccessTokenExpiresMinutes),
                 UserId = user.Id,
                 Username = user.Username,
                 Email = user.Email,
@@ -138,7 +160,7 @@ namespace ISP.Infrastructure.Services
             {
                 Token = newAccessToken,
                 RefreshToken = newRefreshToken.Token,
-                AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(AccessTokenExpiresMinutes),
                 UserId = user.Id,
                 Username = user.Username,
                 Email = user.Email,
@@ -177,6 +199,49 @@ namespace ISP.Infrastructure.Services
 
             // true = تم الإلغاء بنجاح
             return true;
+        }
+
+        // ============================================
+        // HandleFailedLoginAsync ← Private Helper 
+        // ============================================
+
+        private async Task HandleFailedLoginAsync(User user)
+        {
+            var maxFailedAttempts = _configuration
+                .GetValue<int>("AccountLockout:MaxFailedAttempts", 5);
+
+            var lockoutDurationMinutes = _configuration
+                .GetValue<int>("AccountLockout:LockoutDurationMinutes", 15);
+
+            user.FailedLoginAttempts++;
+
+            user.LastFailedLoginAt = DateTime.UtcNow;
+
+            if (user.FailedLoginAttempts >= maxFailedAttempts)
+            {
+                user.LockoutEnd = DateTime.UtcNow.AddMinutes(lockoutDurationMinutes);
+            }
+
+            await _unitOfWork.Users.UpdateAsync(user);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        // ============================================
+        // ResetLockoutAsync ← Private Helper 
+        // ============================================
+
+        private async Task ResetLockoutAsync(User user)
+        {
+            if (user.FailedLoginAttempts == 0 && user.LockoutEnd == null)
+                return;
+
+            user.FailedLoginAttempts = 0;
+
+            user.LockoutEnd = null;
+
+            user.LastFailedLoginAt = null;
+
+            await _unitOfWork.Users.UpdateAsync(user);
         }
 
         // ============================================

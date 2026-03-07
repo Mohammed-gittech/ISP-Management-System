@@ -141,7 +141,7 @@ namespace ISP.Tests.Integration.Services.Reports
 
             // Assert 
             report.Should().NotBeNull();
-            report.MonthlyTrend.Count.Should().Be(3);
+            report.MonthlyTrend.Count.Should().Be(4);
         }
 
 

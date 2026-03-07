@@ -4,6 +4,7 @@
 // ============================================
 
 using System.Linq.Expressions;
+using Microsoft.Extensions.Configuration;
 using FluentAssertions;
 using ISP.Application.DTOs.Auth;
 using ISP.Application.Interfaces;
@@ -24,6 +25,7 @@ namespace ISP.Tests.Unit.Services
         private readonly Mock<IUnitOfWork> _unitOfWorkMock;
         private readonly Mock<IPasswordHasher> _passwordHasherMock;
         private readonly Mock<IJwtTokenService> _jwtTokenServiceMock;
+        private readonly IConfiguration _configuration;
         private readonly Mock<IRepository<User>> _userRepoMock;
         private readonly Mock<IRepository<Tenant>> _tenantRepoMock;
         private readonly Mock<IRepository<RefreshToken>> _refreshTokenRepoMock;
@@ -44,6 +46,14 @@ namespace ISP.Tests.Unit.Services
             _unitOfWorkMock = new Mock<IUnitOfWork>();
             _passwordHasherMock = new Mock<IPasswordHasher>();
             _jwtTokenServiceMock = new Mock<IJwtTokenService>();
+            _configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string>
+                {
+                    ["AccountLockout:MaxFailedAttempts"] = "5",
+                    ["AccountLockout:LockoutDurationMinutes"] = "15",
+                    ["JWT:AccessTokenExpiresMinutes"] = "15"
+                })
+                .Build();
             _userRepoMock = new Mock<IRepository<User>>();
             _tenantRepoMock = new Mock<IRepository<Tenant>>();
             _refreshTokenRepoMock = new Mock<IRepository<RefreshToken>>();
@@ -64,7 +74,8 @@ namespace ISP.Tests.Unit.Services
             _sut = new AuthService(
                 _unitOfWorkMock.Object,
                 _passwordHasherMock.Object,
-                _jwtTokenServiceMock.Object
+                _jwtTokenServiceMock.Object,
+                _configuration
             );
         }
 
@@ -75,7 +86,9 @@ namespace ISP.Tests.Unit.Services
         // ينشئ User وهمي — role تتحكم في الدور
         private User CreateFakeUser(
             UserRole role = UserRole.Employee,
-            bool isActive = true) => new User
+            bool isActive = true,
+            int failedAttempts = 0,
+            DateTime? lockoutEnd = null) => new User
             {
                 Id = UserId,
                 TenantId = role == UserRole.SuperAdmin ? null : TenantId,
@@ -84,7 +97,11 @@ namespace ISP.Tests.Unit.Services
                 PasswordHash = "hashed_password",
                 Role = role,
                 IsActive = isActive,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+
+                FailedLoginAttempts = failedAttempts,
+                LockoutEnd = lockoutEnd,
+                LastFailedLoginAt = failedAttempts > 0 ? DateTime.UtcNow : null
             };
 
         // ينشئ Tenant وهمي — isActive تتحكم في حالة الوكيل
@@ -249,6 +266,12 @@ namespace ISP.Tests.Unit.Services
             _refreshTokenRepoMock.Verify(
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
+
+            _userRepoMock.Verify(
+                r => r.UpdateAsync(It.Is<User>(u => u.FailedLoginAttempts == 1)),
+                Times.Once);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
 
         // Test 4: Inactive user account
@@ -388,6 +411,159 @@ namespace ISP.Tests.Unit.Services
                 Times.Once);
 
         }
+
+        // Test 7: محاولة Login والحساب مقفول
+        [Fact]
+        [Trait("Category", "AccountLockout")]
+        public async Task LoginAsync_WithLockedAccount_ShouldThrowUnauthorizedAccessException()
+        {
+            // Arrange
+            // حساب مقفول: LockoutEnd في المستقبل
+            // IsLockedOut = LockoutEnd.HasValue && LockoutEnd > UtcNow = true
+            var lockedUser = CreateFakeUser(
+                failedAttempts: 5,
+                lockoutEnd: DateTime.UtcNow.AddMinutes(10)
+            );
+
+            _userRepoMock
+                .Setup(r => r.GetAllAsync(It.IsAny<Expression<Func<User, bool>>>()))
+                .ReturnsAsync(new List<User> { lockedUser });
+
+            // Act
+            var act = async () => await _sut.LoginAsync(CreateFakeRequest());
+
+            // Assert
+            await act.Should()
+                .ThrowAsync<UnauthorizedAccessException>()
+                .WithMessage("*مقفول*");
+            // نتحقق من كلمة "مقفول" فقط — الرقم الدقيق للدقائق يتغير مع الوقت
+
+            // VerifyPassword لا يُستدعى — المهاجم لا يعرف هل كلمة المرور صحيحة
+            _passwordHasherMock.Verify(
+                p => p.VerifyPassword(It.IsAny<string>(), It.IsAny<string>()),
+                Times.Never);
+
+            _jwtTokenServiceMock.Verify(j => j.GenerateToken(It.IsAny<User>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Category", "AccountLockout")]
+        public async Task LoginAsync_WithFifthWrongPassword_ShouldLockAccount()
+        {
+            // Arrange
+            // المستخدم لديه 4 محاولات فاشلة — هذه هي الخامسة والأخيرة
+            var user = CreateFakeUser(failedAttempts: 4);
+
+            _userRepoMock
+                .Setup(r => r.GetAllAsync(It.IsAny<Expression<Func<User, bool>>>()))
+                .ReturnsAsync(new List<User> { user });
+
+            _passwordHasherMock
+                .Setup(p => p.VerifyPassword("Admin@123", user.PasswordHash))
+                .Returns(false);
+
+            // Act
+            var result = await _sut.LoginAsync(CreateFakeRequest());
+
+            // Assert
+            result.Should().BeNull();
+
+            // UpdateAsync مع FailedLoginAttempts = 5 و LockoutEnd != null
+            _userRepoMock.Verify(
+                r => r.UpdateAsync(It.Is<User>(u =>
+                    u.FailedLoginAttempts == 5 &&
+                    u.LockoutEnd != null)),
+                Times.Once);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+        }
+
+        // Test 9: انتهى وقت القفل — يُسمح بالمحاولة
+        [Fact]
+        [Trait("Category", "AccountLockout")]
+        public async Task LoginAsync_WithExpiredLockout_ShouldAllowLogin()
+        {
+            // Arrange
+            // LockoutEnd في الماضي → IsLockedOut = false → مسموح
+            var user = CreateFakeUser(
+                failedAttempts: 5,
+                lockoutEnd: DateTime.UtcNow.AddMinutes(-1)
+            );
+            var tenant = CreateFakeTenant();
+
+            _userRepoMock
+                .Setup(r => r.GetAllAsync(It.IsAny<Expression<Func<User, bool>>>()))
+                .ReturnsAsync(new List<User> { user });
+
+            _passwordHasherMock
+                .Setup(p => p.VerifyPassword("Admin@123", user.PasswordHash))
+                .Returns(true);
+
+            _tenantRepoMock
+                .Setup(r => r.GetByIdAsync(TenantId))
+                .ReturnsAsync(tenant);
+
+            _jwtTokenServiceMock
+                .Setup(j => j.GenerateToken(user))
+                .Returns("new_access_token");
+
+            // Act
+            var result = await _sut.LoginAsync(CreateFakeRequest());
+
+            // Assert
+            result.Should().NotBeNull();
+            result!.Token.Should().Be("new_access_token");
+
+            // ResetLockoutAsync يُصفّر العداد ويُزيل القفل
+            _userRepoMock.Verify(
+                r => r.UpdateAsync(It.Is<User>(u =>
+                    u.FailedLoginAttempts == 0 &&
+                    u.LockoutEnd == null)),
+                Times.Once);
+        }
+
+        // Test 10: Login ناجح بعد محاولات فاشلة يُصفّر العداد
+        [Fact]
+        [Trait("Category", "AccountLockout")]
+        public async Task LoginAsync_WithValidCredentialsAfterFailures_ShouldResetCounter()
+        {
+            // Arrange
+            // 3 محاولات فاشلة سابقة لكن الحساب لم يُقفَل بعد
+            var user = CreateFakeUser(failedAttempts: 3);
+            var tenant = CreateFakeTenant();
+
+            _userRepoMock
+                .Setup(r => r.GetAllAsync(It.IsAny<Expression<Func<User, bool>>>()))
+                .ReturnsAsync(new List<User> { user });
+
+            _passwordHasherMock
+                .Setup(p => p.VerifyPassword("Admin@123", user.PasswordHash))
+                .Returns(true);
+
+            _tenantRepoMock
+                .Setup(r => r.GetByIdAsync(TenantId))
+                .ReturnsAsync(tenant);
+
+            _jwtTokenServiceMock
+                .Setup(j => j.GenerateToken(user))
+                .Returns("access_token");
+
+            // Act
+            var result = await _sut.LoginAsync(CreateFakeRequest());
+
+            // Assert
+            result.Should().NotBeNull();
+
+            // الحقول الثلاثة تُصفَّر معاً في ResetLockoutAsync
+            _userRepoMock.Verify(
+                r => r.UpdateAsync(It.Is<User>(u =>
+                    u.FailedLoginAttempts == 0 &&
+                    u.LockoutEnd == null &&
+                    u.LastFailedLoginAt == null)),
+                Times.Once);
+        }
+
 
         // ============================================
         // RefreshAccessTokenAsync Tests

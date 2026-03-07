@@ -16,7 +16,9 @@ using ISP.Infrastructure.Data;
 using ISP.Infrastructure.Repositories;
 using ISP.Infrastructure.Services;
 using ISP.Tests.Helpers;
+using Microsoft.Extensions.Configuration;
 using Moq;
+using System.Collections.Generic;
 
 namespace ISP.Tests.Integration.Services
 {
@@ -28,11 +30,20 @@ namespace ISP.Tests.Integration.Services
 
         private readonly Mock<IPasswordHasher> _passwordHasherMock;
         private readonly Mock<IJwtTokenService> _jwtTokenServiceMock;
+        private readonly IConfiguration _configuration;
 
         public AuthServiceIntegrationTests()
         {
             _passwordHasherMock = new Mock<IPasswordHasher>();
             _jwtTokenServiceMock = new Mock<IJwtTokenService>();
+            _configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string>
+                {
+                    ["AccountLockout:MaxFailedAttempts"] = "5",
+                    ["AccountLockout:LockoutDurationMinutes"] = "15",
+                    ["JWT:AccessTokenExpiresMinutes"] = "15"
+                })
+                .Build();
         }
 
         // ============================================
@@ -95,7 +106,8 @@ namespace ISP.Tests.Integration.Services
             return new AuthService(
                 unitOfWork,
                 _passwordHasherMock.Object,
-                _jwtTokenServiceMock.Object
+                _jwtTokenServiceMock.Object,
+                _configuration
             );
         }
 
