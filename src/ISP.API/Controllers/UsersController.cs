@@ -14,6 +14,7 @@ namespace ISP.API.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public class UsersController : ControllerBase
     {
         private readonly IUserService _userService;
@@ -32,6 +33,8 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetAll(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10,
@@ -46,6 +49,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet("{id}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetById(int id)
         {
             var user = await _userService.GetByIdAsync(id);
@@ -69,6 +76,8 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet("tenant/{tenantId}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetByTenant(
             int tenantId,
             [FromQuery] int page = 1,
@@ -92,6 +101,9 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> Create([FromBody] CreateUserDto dto)
         {
             try
@@ -126,6 +138,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPut("{id}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateUserDto dto)
         {
             try
@@ -159,6 +175,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpDelete("{id}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Delete(int id)
         {
             try
@@ -206,6 +226,8 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet("deleted")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetDeleted(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
@@ -226,6 +248,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("{id}/restore")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Restore(int id)
         {
             try
@@ -265,6 +291,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpDelete("{id}/permanent")]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> PermanentDelete(int id)
         {
             try
@@ -304,6 +334,9 @@ namespace ISP.API.Controllers
         /// تغيير كلمة المرور (المستخدم الحالي)
         /// </summary>
         [HttpPost("change-password")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
         {
             try
@@ -327,6 +360,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("{id}/reset-password")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> ResetPassword(int id, [FromBody] ResetPasswordDto dto)
         {
             var user = await _userService.GetByIdAsync(id);
@@ -342,7 +379,7 @@ namespace ISP.API.Controllers
                     return Forbid();
             }
 
-            var result = await _userService.ResetPasswordAsync(id, dto.NewPassword);
+            var result = await _userService.ResetPasswordAsync(id, dto);
 
             if (!result)
                 return NotFound(new { success = false, message = "فشل إعادة التعيين" });
@@ -355,6 +392,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("{id}/assign-role")]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> AssignRole(int id, [FromBody] AssignRoleDto dto)
         {
             try

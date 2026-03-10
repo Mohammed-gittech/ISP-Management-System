@@ -212,6 +212,10 @@ namespace ISP.Infrastructure.Services
 
             _logger.LogWarning("Soft deleting User {UserId} - {Username}", id, user.Username);
 
+            // قبل الحذف Refresh Tokens ← جديد: إلغاء كل   
+            // المستخدم المحذوف لا يجب أن يظل مسجّل الدخول
+            await RevokeAllUserTokensAsync(id, "User soft deleted");
+
             await _unitOfWork.Users.SoftDeleteAsync(user);
             await _unitOfWork.SaveChangesAsync();
 
@@ -221,7 +225,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // RESTORE (جديد)
+        // RESTORE 
         // ============================================
 
         public async Task<bool> RestoreAsync(int id)
@@ -261,7 +265,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // GET DELETED (جديد)
+        // GET DELETED 
         // ============================================
 
         public async Task<PagedResultDto<UserDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10)
@@ -297,7 +301,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // PERMANENT DELETE (جديد - SuperAdmin only)
+        // PERMANENT DELETE ( SuperAdmin only)
         // ============================================
 
         public async Task<bool> PermanentDeleteAsync(int id)
@@ -345,6 +349,12 @@ namespace ISP.Infrastructure.Services
             user.PasswordHash = _passwordHasher.HashPassword(dto.NewPassword);
 
             await _unitOfWork.Users.UpdateAsync(user);
+
+            // 3. Refresh Tokens  إلغاء كل 
+            // كلمة المرور تغيّرت → كل الأجهزة يجب أن تعيد تسجيل الدخول
+            // قديم Refresh Token يطرد أي مهاجم يملك  
+            await RevokeAllUserTokensAsync(userId, "Password changed by user");
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Password changed for user: {UserId}", userId);
@@ -352,14 +362,20 @@ namespace ISP.Infrastructure.Services
             return true;
         }
 
-        public async Task<bool> ResetPasswordAsync(int userId, string newPassword)
+        public async Task<bool> ResetPasswordAsync(int userId, ResetPasswordDto dto)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
             if (user == null) return false;
 
-            user.PasswordHash = _passwordHasher.HashPassword(newPassword);
+            user.PasswordHash = _passwordHasher.HashPassword(dto.NewPassword);
 
             await _unitOfWork.Users.UpdateAsync(user);
+
+            // Refresh Tokens إلغاء كل 
+            // غيّر كلمة المرور → يجب طرد كل الجلسات فوراً Admin
+            // قديم Refresh Token يمنع المهاجم من الاستمرار باستخدام 
+            await RevokeAllUserTokensAsync(userId, "Password reset by admin");
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Password reset for user: {UserId}", userId);
@@ -438,6 +454,42 @@ namespace ISP.Infrastructure.Services
                 users = users.Where(u => u.Id != excludeUserId.Value);
 
             return !users.Any();
+        }
+
+        // ============================================
+        // PRIVATE HELPERS
+        // ============================================
+
+        /// <summary>
+        /// النشطة للمستخدم Refresh Tokens إلغاء كل 
+        /// يُستدعى عند: تغيير كلمة المرور، إعادة تعيينها، حذف المستخدم
+        /// </summary>
+        /// <param name="userId">معرّف المستخدم</param>
+        /// <param name="reason"> Logging سبب الإلغاء </param>
+        private async Task RevokeAllUserTokensAsync(int userId, string reason)
+        {
+            // Get All Refresh Tokens for the user that are not revoked
+            var activeTokens = await _unitOfWork.RefreshTokens.GetAllAsync(
+                t => t.UserId == userId && !t.IsRevoked);
+
+            if (!activeTokens.Any())
+                return;
+
+            foreach (var token in activeTokens)
+            {
+                token.IsRevoked = true;
+                token.RevokedAt = DateTime.UtcNow;
+                await _unitOfWork.RefreshTokens.UpdateAsync(token);
+            }
+
+            _logger.LogInformation(
+                "Revoked {Count} refresh tokens for user {UserId}. Reason: {Reason}",
+                activeTokens.Count(), userId, reason);
+
+            // هنا SaveChangesAsync ملاحظة: لا 
+            //(ChangePasswordAsync / ResetPasswordAsync / DeleteAsync) المُستدعي 
+            // في النهاية SaveChangesAsync هو من يستدعي
+            // واحدة Transaction هكذا يتم حفظ كل شيء في 
         }
     }
 }

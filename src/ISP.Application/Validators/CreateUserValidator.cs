@@ -3,12 +3,13 @@
 // ============================================
 using FluentValidation;
 using ISP.Application.DTOs.Users;
+using Microsoft.Extensions.Configuration;
 
 namespace ISP.Application.Validators
 {
     public class CreateUserValidator : AbstractValidator<CreateUserDto>
     {
-        public CreateUserValidator()
+        public CreateUserValidator(IConfiguration configuration)
         {
             // Username: إجباري، 3-50 حرف
             RuleFor(u => u.Username)
@@ -23,7 +24,7 @@ namespace ISP.Application.Validators
             // Password: إجباري، 6+ أحرف
             RuleFor(u => u.Password)
                 .NotEmpty().WithMessage("كلمة المرور مطلوبة")
-                .MinimumLength(6).WithMessage("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
+                .SetValidator(new PasswordPolicyValidator(configuration));
 
             // Role: إجباري، من القائمة المسموحة
             RuleFor(u => u.Role)

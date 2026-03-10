@@ -1,12 +1,13 @@
 // ============================================
 // CreateTenantValidatorTests.cs
-// Unit tests for CreateTenantValidator
+// Unit Tests for CreateTenantValidator
 // ============================================
 
 using FluentValidation.TestHelper;
 using ISP.Application.DTOs.Tenants;
 using ISP.Application.Validators;
 using ISP.Domain.Enums;
+using Microsoft.Extensions.Configuration;
 
 namespace ISP.Tests.Unit.Validators
 {
@@ -14,73 +15,82 @@ namespace ISP.Tests.Unit.Validators
     {
         private readonly CreateTenantValidator _validator;
 
+        // ============================================
+        // Helper — IConfiguration وهمي
+        // ============================================
+
+        private static IConfiguration BuildConfig(
+            int minLength = 8,
+            int maxLength = 128,
+            bool requireUppercase = true,
+            bool requireLowercase = true,
+            bool requireDigit = true,
+            bool requireSpecial = true)
+        {
+            return new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["PasswordPolicy:MinimumLength"] = minLength.ToString(),
+                    ["PasswordPolicy:MaximumLength"] = maxLength.ToString(),
+                    ["PasswordPolicy:RequireUppercase"] = requireUppercase.ToString(),
+                    ["PasswordPolicy:RequireLowercase"] = requireLowercase.ToString(),
+                    ["PasswordPolicy:RequireDigit"] = requireDigit.ToString(),
+                    ["PasswordPolicy:RequireSpecialCharacter"] = requireSpecial.ToString()
+                })
+                .Build();
+        }
+
         public CreateTenantValidatorTests()
         {
-            _validator = new CreateTenantValidator();
+            _validator = new CreateTenantValidator(BuildConfig());
         }
 
         // ============================================
         // Helper Method — بيانات صحيحة جاهزة
         // ============================================
 
-        // يُنشئ dto صحيح كامل — كل اختبار يعدل الحقل الذي يريد اختباره فقط
         private CreateTenantDto CreateValidDto(TenantPlan plan = TenantPlan.Free) => new CreateTenantDto
         {
             Name = "شركة النور",
             ContactEmail = "info@alnoor.com",
             ContactPhone = "0501234567",
             SubscriptionPlan = plan,
-            DurationMonths = 1,
+            DurationMonths = plan == TenantPlan.Free ? 1 : 3,
             AdminUsername = "admin",
             AdminEmail = "admin@alnoor.com",
             AdminPassword = "Admin@123"
+            // ← "Admin@123" تمر الآن: 8+ أحرف، Uppercase، Lowercase، Digit، Special
         };
 
         // ============================================
-        // Valid Data Tests — الحالات الصحيحة
+        // Valid Data Tests
         // ============================================
 
-        // الاختبار الأول: Free Plan بيانات صحيحة كاملة
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithValidFreePlanData_ShouldPass()
         {
-            // Arrange
-            var dto = CreateValidDto(TenantPlan.Free);
-
-            // Act
-            var result = _validator.TestValidate(dto);
-
-            // Assert
+            var result = _validator.TestValidate(CreateValidDto(TenantPlan.Free));
             result.ShouldNotHaveAnyValidationErrors();
         }
 
-        // الاختبار الثاني: Basic Plan مع 3 أشهر
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithValidBasicPlan3Months_ShouldPass()
         {
-            // Arrange
             var dto = CreateValidDto(TenantPlan.Basic);
             dto.DurationMonths = 3;
-
-            // Act
             var result = _validator.TestValidate(dto);
-
-            // Assert
             result.ShouldNotHaveAnyValidationErrors();
         }
 
-        // الاختبار الثالث: Pro Plan مع 12 شهر
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithValidProPlan12Months_ShouldPass()
         {
-            // Arrange
             var dto = CreateValidDto(TenantPlan.Pro);
             dto.DurationMonths = 12;
-
-            // Act
             var result = _validator.TestValidate(dto);
-
-            // Assert
             result.ShouldNotHaveAnyValidationErrors();
         }
 
@@ -88,34 +98,28 @@ namespace ISP.Tests.Unit.Validators
         // Name Tests
         // ============================================
 
-        // الاختبار الرابع: Name فارغ
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithEmptyName_ShouldFailWithMessage()
         {
-            // Arrange
             var dto = CreateValidDto();
             dto.Name = string.Empty;
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.Name)
                 .WithErrorMessage("اسم الشركة مطلوب");
         }
 
-        // الاختبار الخامس: Name أكثر من 100 حرف
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithNameExceeding100Characters_ShouldFail()
         {
-            // Arrange
             var dto = CreateValidDto();
-            dto.Name = new string('أ', 101); // 101 حرف
+            dto.Name = new string('أ', 101);
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.Name)
                 .WithErrorMessage("اسم الشركة لا يمكن أن يتجاوز 100 حرف");
         }
@@ -124,34 +128,28 @@ namespace ISP.Tests.Unit.Validators
         // ContactEmail Tests
         // ============================================
 
-        // الاختبار السادس: Email فارغ
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithEmptyContactEmail_ShouldFailWithMessage()
         {
-            // Arrange
             var dto = CreateValidDto();
             dto.ContactEmail = string.Empty;
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.ContactEmail)
                 .WithErrorMessage("البريد الإلكتروني مطلوب");
         }
 
-        // الاختبار السابع: Email غير صالح
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithInvalidContactEmail_ShouldFail()
         {
-            // Arrange
             var dto = CreateValidDto();
-            dto.ContactEmail = "not-an-email"; // بدون @
+            dto.ContactEmail = "not-an-email";
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.ContactEmail)
                 .WithErrorMessage("البريد الإلكتروني غير صالح");
         }
@@ -160,105 +158,125 @@ namespace ISP.Tests.Unit.Validators
         // AdminUsername Tests
         // ============================================
 
-        // الاختبار الثامن: AdminUsername أقل من 3 أحرف
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithShortAdminUsername_ShouldFailWithMessage()
         {
-            // Arrange
             var dto = CreateValidDto();
-            dto.AdminUsername = "ab"; // حرفان فقط
+            dto.AdminUsername = "ab";
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.AdminUsername)
                 .WithErrorMessage("اسم المستخدم يجب أن يكون 3 أحرف على الأقل");
         }
 
         // ============================================
-        // AdminPassword Tests
+        // AdminPassword Tests ← محدَّث بالكامل
         // ============================================
 
-        // الاختبار التاسع: AdminPassword أقل من 6 أحرف
         [Fact]
-        public void Validate_WithShortAdminPassword_ShouldFailWithMessage()
+        [Trait("Category", "CreateTenantValidator")]
+        public void Validate_WithEmptyAdminPassword_ShouldFailWithMessage()
         {
-            // Arrange
             var dto = CreateValidDto();
-            dto.AdminPassword = "123"; // 3 أحرف فقط
+            dto.AdminPassword = string.Empty;
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.AdminPassword)
-                .WithErrorMessage("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
+                .WithErrorMessage("كلمة المرور للمسؤول مطلوبة");
+        }
+
+        [Fact]
+        [Trait("Category", "CreateTenantValidator")]
+        public void Validate_WithAdminPasswordShorterThan8Chars_ShouldFail()
+        {
+            // ← تعديل: من 6 إلى 8 حسب الـ Policy الجديدة
+            var dto = CreateValidDto();
+            dto.AdminPassword = "Aa1!aaa"; // 7 أحرف
+
+            var result = _validator.TestValidate(dto);
+
+            result.ShouldHaveValidationErrorFor(x => x.AdminPassword)
+                .WithErrorMessage("كلمة المرور يجب أن تكون على الأقل 8 حرفاً");
+        }
+
+        [Fact]
+        [Trait("Category", "CreateTenantValidator")]
+        public void Validate_WithAdminPasswordWithoutUppercase_ShouldFail()
+        {
+            var dto = CreateValidDto();
+            dto.AdminPassword = "admin@123";
+
+            var result = _validator.TestValidate(dto);
+
+            result.ShouldHaveValidationErrorFor(x => x.AdminPassword)
+                .WithErrorMessage("كلمة المرور يجب أن تحتوي على حرف كبير على الأقل (A-Z)");
+        }
+
+        [Fact]
+        [Trait("Category", "CreateTenantValidator")]
+        public void Validate_WithAdminPasswordWithoutSpecialChar_ShouldFail()
+        {
+            var dto = CreateValidDto();
+            dto.AdminPassword = "Admin1234";
+
+            var result = _validator.TestValidate(dto);
+
+            result.ShouldHaveValidationErrorFor(x => x.AdminPassword)
+                .WithErrorMessage("كلمة المرور يجب أن تحتوي على رمز خاص على الأقل (!@#$%^&*)");
         }
 
         // ============================================
         // DurationMonths Tests
         // ============================================
 
-        // الاختبار العاشر: Free Plan مع DurationMonths = 1 — يجب أن يمر
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithFreePlanAndDuration1_ShouldPass()
         {
-            // Arrange
             var dto = CreateValidDto(TenantPlan.Free);
             dto.DurationMonths = 1;
-
-            // Act
             var result = _validator.TestValidate(dto);
-
-            // Assert
             result.ShouldNotHaveValidationErrorFor(x => x.DurationMonths);
         }
 
-        // الاختبار الحادي عشر: Free Plan مع DurationMonths = 6 — يجب أن يفشل
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithFreePlanAndDurationMoreThan1_ShouldFailWithMessage()
         {
-            // Arrange
             var dto = CreateValidDto(TenantPlan.Free);
-            dto.DurationMonths = 6; // Free يقبل شهر واحد فقط
+            dto.DurationMonths = 6;
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.DurationMonths)
                 .WithErrorMessage("الباقة المجانية شهر واحد فقط");
         }
 
-        // الاختبار الثاني عشر: Basic Plan مع DurationMonths = 0 — يجب أن يفشل
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithBasicPlanAndDuration0_ShouldFailWithMessage()
         {
-            // Arrange
             var dto = CreateValidDto(TenantPlan.Basic);
             dto.DurationMonths = 0;
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.DurationMonths)
                 .WithErrorMessage("المدة يجب أن تكون شهر واحد على الأقل");
         }
 
-        // الاختبار الثالث عشر: Basic Plan مع DurationMonths = 13 — يجب أن يفشل
         [Fact]
+        [Trait("Category", "CreateTenantValidator")]
         public void Validate_WithBasicPlanAndDurationMoreThan12_ShouldFailWithMessage()
         {
-            // Arrange
             var dto = CreateValidDto(TenantPlan.Basic);
-            dto.DurationMonths = 13; // أكثر من الحد الأقصى
+            dto.DurationMonths = 13;
 
-            // Act
             var result = _validator.TestValidate(dto);
 
-            // Assert
             result.ShouldHaveValidationErrorFor(x => x.DurationMonths)
                 .WithErrorMessage("المدة لا يمكن أن تتجاوز 12 شهراً");
         }

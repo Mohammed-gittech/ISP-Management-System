@@ -47,7 +47,7 @@ namespace ISP.Tests.Unit.Services
             _passwordHasherMock = new Mock<IPasswordHasher>();
             _jwtTokenServiceMock = new Mock<IJwtTokenService>();
             _configuration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string>
+                .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["AccountLockout:MaxFailedAttempts"] = "5",
                     ["AccountLockout:LockoutDurationMinutes"] = "15",

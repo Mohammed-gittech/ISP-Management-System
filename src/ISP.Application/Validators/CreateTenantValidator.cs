@@ -4,12 +4,13 @@
 using ISP.Application.DTOs.Tenants;
 using FluentValidation;
 using ISP.Domain.Enums;
+using Microsoft.Extensions.Configuration;
 
 namespace ISP.Application.Validators
 {
     public class CreateTenantValidator : AbstractValidator<CreateTenantDto>
     {
-        public CreateTenantValidator()
+        public CreateTenantValidator(IConfiguration configuration)
         {
             RuleFor(x => x.Name)
                 .NotEmpty().WithMessage("اسم الشركة مطلوب")
@@ -47,7 +48,7 @@ namespace ISP.Application.Validators
 
             RuleFor(x => x.AdminPassword)
                 .NotEmpty().WithMessage("كلمة المرور للمسؤول مطلوبة")
-                .MinimumLength(6).WithMessage("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
+                .SetValidator(new PasswordPolicyValidator(configuration));
         }
     }
 

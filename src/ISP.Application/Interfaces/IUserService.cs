@@ -17,7 +17,7 @@ namespace ISP.Application.Interfaces
 
         // Password Management
         Task<bool> ChangePasswordAsync(int userId, ChangePasswordDto dto);
-        Task<bool> ResetPasswordAsync(int userId, string newPassword);
+        Task<bool> ResetPasswordAsync(int userId, ResetPasswordDto dto);
 
         // Role Management
         Task<bool> AssignRoleAsync(int userId, string role);

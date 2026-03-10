@@ -3,12 +3,13 @@
 // ============================================
 using FluentValidation;
 using ISP.Application.DTOs.Users;
+using Microsoft.Extensions.Configuration;
 
 namespace ISP.Application.Validators
 {
     public class ChangePasswordValidator : AbstractValidator<ChangePasswordDto>
     {
-        public ChangePasswordValidator()
+        public ChangePasswordValidator(IConfiguration configuration)
         {
             // OldPassword: إجباري
             RuleFor(x => x.OldPassword)
@@ -17,7 +18,7 @@ namespace ISP.Application.Validators
             // NewPassword: إجباري، 6+ أحرف
             RuleFor(x => x.NewPassword)
                 .NotEmpty().WithMessage("كلمة المرور الجديدة مطلوبة")
-                .MinimumLength(6).WithMessage("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
+                .SetValidator(new PasswordPolicyValidator(configuration));
 
             // ConfirmPassword: يجب أن يطابق NewPassword
             RuleFor(x => x.ConfirmPassword)
