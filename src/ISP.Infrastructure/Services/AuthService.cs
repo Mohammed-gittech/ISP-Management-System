@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using ISP.Application.DTOs.Auth;
+using ISP.Application.Helpers;
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Interfaces;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace ISP.Infrastructure.Services
 {
@@ -16,17 +18,20 @@ namespace ISP.Infrastructure.Services
         private readonly IPasswordHasher _passwordHasher;
         private readonly IJwtTokenService _jwtTokenService;
         private readonly IConfiguration _configuration;
+        private readonly ILogger<AuthService> _logger;
 
         public AuthService(
             IUnitOfWork unitOfWork,
             IPasswordHasher passwordHasher,
             IJwtTokenService jwtTokenService,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            ILogger<AuthService> logger)
         {
             _unitOfWork = unitOfWork;
             _passwordHasher = passwordHasher;
             _jwtTokenService = jwtTokenService;
             _configuration = configuration;
+            _logger = logger;
         }
 
         private const int RefreshTokenExpiryDays = 7;
@@ -38,47 +43,70 @@ namespace ISP.Infrastructure.Services
         /// </summary>
         public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request)
         {
-            // 1. البحث عن المستخدم بالـ Email
+            // 1. Find user by email
             var users = await _unitOfWork.Users.GetAllAsync(u => u.Email == request.Email);
             var user = users.FirstOrDefault();
 
             if (user == null)
+            {
+                // Unknown email — mask before logging
+                _logger.LogWarning(
+                    "Login attemp with unknown email | Email:{Email}",
+                    EmailHelper.Mask(request.Email));
                 return null;
+            }
 
-            // 2. هل الحساب مقفول؟
+            // 2. Check lockout
             if (user.IsLockedOut)
             {
-                // throw new UnauthorizedAccessException(
-                //     $"  .دقيقة {user.LockoutRemainingMinutes} الحساب مقفول بسبب محاولات تسجيل دخول متعددة. حاول مجدداً بعد" +
-                //     $" ");
+                _logger.LogWarning(
+                    "Login attempt on locked account | User:{UserId} | RemainingMinutes:{Minutes}",
+                    user.Id, user.LockoutRemainingMinutes);
+
                 throw new UnauthorizedAccessException(
                     $"الحساب مقفول بسبب محاولات تسجيل دخول متعددة. حاول مجدداً بعد {user.LockoutRemainingMinutes} دقيقة.");
-
             }
-            // 3. التحقق من كلمة المرور
+
+            // 3. Verify password
             if (!_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
             {
+                _logger.LogWarning(
+                    "Failed login attempt | User:{UserId} | Attempt:{Count}",
+                    user.Id, user.FailedLoginAttempts + 1);
+
                 await HandleFailedLoginAsync(user);
                 return null;
             }
 
 
-            // 4. التحقق من أن الحساب نشط
+            // 4. Check active status
             if (!user.IsActive)
-                throw new UnauthorizedAccessException("الحساب معطّل");
+            {
+                _logger.LogWarning(
+                    "Login attempt on inactive account | User:{UserId}",
+                    user.Id);
 
-            // 5. التحقق من أن Tenant نشط (إذا لم يكن SuperAdmin)
+                throw new UnauthorizedAccessException("الحساب معطّل");
+            }
+
+            // 5. Check tenant status
             if (user.TenantId.HasValue)
             {
                 var tenant = await _unitOfWork.Tenants.GetByIdAsync(user.TenantId.Value);
                 if (tenant == null || !tenant.IsActive)
+                {
+                    _logger.LogWarning(
+                        "Login attempt on disabled tenant | User:{UserId} | Tenant:{TenantId}",
+                        user.Id, user.TenantId);
+
                     throw new UnauthorizedAccessException("حساب الوكيل معطّل");
+                }
             }
 
-            // 6. كلمة المرور صحيحة — صفِّر العداد
+            // 6. Reset lockout
             await ResetLockoutAsync(user);
 
-            // 7. توليد Access Token
+            // 7. Generate tokens
             var accessToken = _jwtTokenService.GenerateToken(user);
 
             // 8. Refresh Token
@@ -86,6 +114,10 @@ namespace ISP.Infrastructure.Services
 
             await _unitOfWork.SaveChangesAsync();
 
+            // Successful login
+            _logger.LogInformation(
+                "User logged in successfully | User:{UserId} | Tenant:{TenantId} | Role:{Role}",
+                user.Id, user.TenantId, user.Role);
             return new LoginResponseDto
             {
                 Token = accessToken,
@@ -120,41 +152,64 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<LoginResponseDto?> RefreshAccessTokenAsync(string refreshToken)
         {
-            // 1. DB في Token ابحث عن الـ
+            // 1. Find token in DB
             var tokens = await _unitOfWork.RefreshTokens
                 .GetAllAsync(r => r.Token == refreshToken);
 
             var existingToken = tokens.FirstOrDefault();
 
-            // 2. هل وُجد؟
+            // 2. Token not found
             if (existingToken == null)
-                return null;
+            {
+                _logger.LogWarning(
+                    "Refresh token not found | Token:{Token}",
+                    refreshToken[..10] + "...");
 
-            // 3. هل لا يزال صالحاً؟
+                return null;
+            }
+
+            // 3. Token is not active (revoked or expired)
             if (!existingToken.IsActive)
-                return null;
-            // IsActive = !IsRevoked && !IsExpired
+            {
+                _logger.LogWarning(
+                    "Inactive refresh token used | User:{UserId} | IsRevoked:{IsRevoked} | ExpiresAt:{ExpiresAt}",
+                    existingToken.UserId, existingToken.IsRevoked, existingToken.ExpiresAt);
 
-            // 4. جلب المستخدم
+                return null;
+            }
+
+
+            // 4. Find user
             var user = await _unitOfWork.Users.GetByIdAsync(existingToken.UserId);
 
             if (user == null || !user.IsActive)
-                return null;
+            {
+                _logger.LogWarning(
+                    "Refresh token used for inactive or missing user | User:{UserId}",
+                    existingToken.UserId);
 
-            // 5. ← Token Rotation: إلغاء القديم
+                return null;
+            }
+
+            // 5. Token Rotation — revoke old token
             existingToken.IsRevoked = true;
             existingToken.RevokedAt = DateTime.UtcNow;
 
             await _unitOfWork.RefreshTokens.UpdateAsync(existingToken);
 
-            // 6. إنشاء Refresh Token جديد
+            // 6. Create new refresh token
             var newRefreshToken = await CreateRefreshTokenAsync(user.Id);
 
-            // 7. حفظ كل التغييرات دفعة واحدة
+            // 7. Save all changes
             await _unitOfWork.SaveChangesAsync();
 
-            // 8. توليد Access Token جديد
+            // 8. Generate new access token
             var newAccessToken = _jwtTokenService.GenerateToken(user);
+
+            // Token refreshed successfully
+            _logger.LogInformation(
+                "Access token refreshed successfully | User:{UserId} | Tenant:{TenantId}",
+                user.Id, user.TenantId);
 
             return new LoginResponseDto
             {
@@ -176,28 +231,44 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<bool> RevokeRefreshTokenAsync(string refreshToken)
         {
-            // 1. ابحث عن التوكن
+            // 1. Find token
             var tokens = await _unitOfWork.RefreshTokens
                 .GetAllAsync(r => r.Token == refreshToken);
 
             var existingToken = tokens.FirstOrDefault();
 
-            // 2. لو لم يوجد
+            // 2. Token not found
             if (existingToken == null)
-                return false;
+            {
+                _logger.LogWarning(
+                    "Revoke attempt on non-existent token | Token:{Token}",
+                    refreshToken[..10] + "...");
 
-            // 3. لو موجود لكن أُلغي مسبقاً
+                return false;
+            }
+
+            // 3. Already revoked
             if (existingToken.IsRevoked)
-                return false;
+            {
+                _logger.LogWarning(
+                    "Revoke attempt on already revoked token | User:{UserId}",
+                    existingToken.UserId);
 
-            // 4. إلغاؤه
+                return false;
+            }
+
+            // 4. Revoke token
             existingToken.IsRevoked = true;
             existingToken.RevokedAt = DateTime.UtcNow;
 
             await _unitOfWork.RefreshTokens.UpdateAsync(existingToken);
             await _unitOfWork.SaveChangesAsync();
 
-            // true = تم الإلغاء بنجاح
+            // Token revoked successfully
+            _logger.LogInformation(
+                "Refresh token revoked successfully | User:{UserId}",
+                existingToken.UserId);
+
             return true;
         }
 
@@ -220,6 +291,18 @@ namespace ISP.Infrastructure.Services
             if (user.FailedLoginAttempts >= maxFailedAttempts)
             {
                 user.LockoutEnd = DateTime.UtcNow.AddMinutes(lockoutDurationMinutes);
+
+                // Account locked — critical security event
+                _logger.LogWarning(
+                    "Account locked after {Count} failed attempts | User:{UserId} | LockoutEnd:{LockoutEnd}",
+                    user.FailedLoginAttempts, user.Id, user.LockoutEnd);
+            }
+            else
+            {
+                // Failed attempt — not locked yet
+                _logger.LogWarning(
+                    "Failed login attempt {Count}/{Max} | User:{UserId}",
+                    user.FailedLoginAttempts, maxFailedAttempts, user.Id);
             }
 
             await _unitOfWork.Users.UpdateAsync(user);

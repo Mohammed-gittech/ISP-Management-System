@@ -23,294 +23,312 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
 
-// ✅ Validate Configuration عند البداية
-builder.Configuration.ValidateRequiredSettings();
-
-// Add services to the container.
-// ============================================
-// Database
-// ============================================
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        b => b.MigrationsAssembly("ISP.Infrastructure") //مهم!
-    )
-);
-
-// ============================================
-// Hangfire Configuration
-// ============================================
-builder.Services.AddHangfire(config =>
+try
 {
-    config
-        .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
-        .UseSimpleAssemblyNameTypeSerializer()
-        .UseRecommendedSerializerSettings()
-        .UseSqlServerStorage(
-            builder.Configuration.GetConnectionString("HangfireConnection"),
-            new SqlServerStorageOptions
-            {
-                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
-                SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
-                QueuePollInterval = TimeSpan.Zero,
-                UseRecommendedIsolationLevel = true,
-                DisableGlobalLocks = true
-            });
-});
 
-// Add Hangfire Server
-builder.Services.AddHangfireServer();
+    Log.Information("Starting ISP Management System...");
 
-// ============================================
-// Authentication & JWT
-// ============================================
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+    var builder = WebApplication.CreateBuilder(args);
+
+    // Replace built-in logging with Serilog
+    builder.Host.UseSerilog((context, services, configuration) =>
+        configuration
+            .ReadFrom.Configuration(context.Configuration) // Read settings from appsettings.json (Serilog section)
+            .ReadFrom.Services(services) // Allow Serilog to access DI services
+            .Enrich.FromLogContext() // Enable manual context enrichment in services
+    );
+
+    // ✅ Validate Configuration عند البداية
+    builder.Configuration.ValidateRequiredSettings();
+
+    // Add services to the container.
+    // ============================================
+    // Database
+    // ============================================
+    builder.Services.AddDbContext<ApplicationDbContext>(options =>
+        options.UseSqlServer(
+            builder.Configuration.GetConnectionString("DefaultConnection"),
+            b => b.MigrationsAssembly("ISP.Infrastructure") //مهم!
+        )
+    );
+
+    // ============================================
+    // Hangfire Configuration
+    // ============================================
+    builder.Services.AddHangfire(config =>
     {
-        options.TokenValidationParameters = new TokenValidationParameters
+        config
+            .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+            .UseSimpleAssemblyNameTypeSerializer()
+            .UseRecommendedSerializerSettings()
+            .UseSqlServerStorage(
+                builder.Configuration.GetConnectionString("HangfireConnection"),
+                new SqlServerStorageOptions
+                {
+                    CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+                    SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
+                    QueuePollInterval = TimeSpan.Zero,
+                    UseRecommendedIsolationLevel = true,
+                    DisableGlobalLocks = true
+                });
+    });
+
+    // Add Hangfire Server
+    builder.Services.AddHangfireServer();
+
+    // ============================================
+    // Authentication & JWT
+    // ============================================
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
         {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
-            ValidateIssuer = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidateAudience = true,
-            ValidAudience = builder.Configuration["Jwt:Audience"],
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(
+                    Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
+                ValidateIssuer = true,
+                ValidIssuer = builder.Configuration["Jwt:Issuer"],
+                ValidateAudience = true,
+                ValidAudience = builder.Configuration["Jwt:Audience"],
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero
+            };
+        });
+    builder.Services.AddAuthorization();
+
+    // ============================================
+    // CORS Policy
+    // ============================================
+
+    builder.Services.AddCors(options =>
+    {
+        // ============================
+        // السياسة الأولى — DevelopmentPolicy
+        // ============================
+        options.AddPolicy("DevelopmentPolicy", policy =>
+        {
+            policy
+            .WithOrigins("http://localhost:3000", "http://localhost:8080") // WithOrigins = حدد العناوين المسموح لها
+            .AllowAnyMethod()  // AllowAnyMethod = اسمح لكل HTTP Methods
+            .AllowAnyHeader() // AllowAnyHeader = اسمح لكل Headers
+            .AllowCredentials(); // AllowCredentials = اسمح بإرسال Authorization Headers
+        });
+
+        // ============================
+        // السياسة الثانية — ProductionPolicy
+        // ============================
+        options.AddPolicy("ProductionPolicy", policy =>
+        {
+            var allowedOrigins = builder.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>() ?? [];
+
+            policy
+            .WithOrigins(allowedOrigins)
+            .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH")
+            .WithHeaders("Content-Type", "Authorization", "X-Tenant-Id")
+            .AllowCredentials();
+        });
+    });
+
+
+    // ============================================
+    // Rate Limiting ← جديد
+    // ============================================
+    builder.Services.AddRateLimiter(options =>
+    {
+        // AuthPolicy
+        options.AddSlidingWindowLimiter("AuthPolicy", limiterOptions =>
+        {
+            limiterOptions.PermitLimit = builder.Configuration
+                .GetValue<int>("RateLimiting:Auth:PermitLimit", 5);
+
+            limiterOptions.Window = TimeSpan.FromSeconds(
+                builder.Configuration.GetValue<int>("RateLimiting:Auth:WindowSeconds", 60));
+
+            limiterOptions.SegmentsPerWindow = 6;
+
+            limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+            limiterOptions.QueueLimit = 0;
+        });
+
+        // GlobalPolicy
+        options.AddFixedWindowLimiter("GlobalPolicy", limiterOptions =>
+        {
+            limiterOptions.PermitLimit = builder.Configuration
+                .GetValue<int>("RateLimiting:Global:PermitLimit", 100);
+
+            limiterOptions.Window = TimeSpan.FromSeconds(
+                builder.Configuration.GetValue<int>("RateLimiting:Global:WindowSeconds", 60));
+
+            limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+            limiterOptions.QueueLimit = 0;
+        });
+
+        options.OnRejected = async (context, cancellationToken) =>
+        {
+            // 429 = Too Many Requests
+            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+
+            if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+            {
+                context.HttpContext.Response.Headers.RetryAfter =
+                    ((int)retryAfter.TotalSeconds).ToString();
+            }
+
+            // Client رسالة واضحة للـ 
+            context.HttpContext.Response.ContentType = "application/json";
+            await context.HttpContext.Response.WriteAsync(
+                "{\"message\": \"لقد تجاوزت الحد المسموح به من الطلبات. حاول مجدداً لاحقاً.\"}",
+                cancellationToken);
         };
     });
-builder.Services.AddAuthorization();
 
-// ============================================
-// CORS Policy
-// ============================================
 
-builder.Services.AddCors(options =>
-{
-    // ============================
-    // السياسة الأولى — DevelopmentPolicy
-    // ============================
-    options.AddPolicy("DevelopmentPolicy", policy =>
+    // ============================================
+    // AutoMapper
+    // ============================================
+    builder.Services.AddAutoMapper(typeof(AutoMapperProfile).Assembly);
+
+    // ============================================
+    // FluentValidation
+    // ============================================
+
+    builder.Services.AddFluentValidationAutoValidation();
+    builder.Services.AddValidatorsFromAssemblyContaining<CreateTenantValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<CreateSubscriberValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<CreatePlanValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<CreateSubscriptionValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<UpdateSubscriberValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<CreateCashPaymentValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<CreateUserValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<UpdateUserValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<ChangePasswordValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<RenewTenantSubscriptionValidator>();
+    builder.Services.AddValidatorsFromAssemblyContaining<ConfirmTenantPaymentValidator>();
+
+    // ============================================
+    // Repository & Unit of Work
+    // ============================================
+    builder.Services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
+    builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+    // ============================================
+    // Identity Services
+    // ============================================
+    builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+    builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
+
+    // ============================================
+    // Business Services
+    // ============================================
+    builder.Services.AddScoped<ICurrentTenantService, CurrentTenantService>();
+    builder.Services.AddScoped<ITenantService, TenantService>();
+    builder.Services.AddScoped<IAuthService, AuthService>();
+    builder.Services.AddScoped<ISubscriberService, SubscriberService>();
+    builder.Services.AddScoped<IPlanService, PlanService>();
+    builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
+
+    // ============================================
+    // Phase 2: Telegram & Notification Services
+    // ============================================
+    builder.Services.AddScoped<ITelegramService, TelegramService>();
+    builder.Services.AddScoped<INotificationService, NotificationService>();
+
+    // ============================================
+    // Phase 2: Background Jobs
+    // ============================================
+    builder.Services.AddScoped<NotificationJob>();
+    builder.Services.AddScoped<SubscriptionStatusJob>();
+    builder.Services.AddScoped<RetentionCleanupJob>();
+
+    // ============================================
+    // Phase 3: Users Management Service
+    // ============================================
+    builder.Services.AddScoped<IUserService, UserService>();
+
+    // ============================================
+    // Phase 3: Validators
+    // ============================================
+
+
+    // ============================================
+    // Phase 3: Audit Log Service
+    // ============================================
+    builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+
+    // ============================================
+    // Payment System Services
+    // ============================================
+    builder.Services.AddScoped<IPaymentService, PaymentService>();
+    builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+
+    // ============================================
+    // Reports & Analytics Service
+    // ============================================
+    builder.Services.AddScoped<IReportService, ReportService>();
+
+    // ============================================
+    // HttpContextAccessor (مطلوب للـ IP Address)
+    // ============================================
+    builder.Services.AddHttpContextAccessor();
+
+    builder.Services.AddControllers();
+
+    builder.Services.AddEndpointsApiExplorer();
+    // Register Swagger generator and customize its behavior.
+    builder.Services.AddSwaggerGen(options =>
     {
-        policy
-        .WithOrigins("http://localhost:3000", "http://localhost:8080") // WithOrigins = حدد العناوين المسموح لها
-        .AllowAnyMethod()  // AllowAnyMethod = اسمح لكل HTTP Methods
-        .AllowAnyHeader() // AllowAnyHeader = اسمح لكل Headers
-        .AllowCredentials(); // AllowCredentials = اسمح بإرسال Authorization Headers
-    });
-
-    // ============================
-    // السياسة الثانية — ProductionPolicy
-    // ============================
-    options.AddPolicy("ProductionPolicy", policy =>
-    {
-        var allowedOrigins = builder.Configuration
-            .GetSection("Cors:AllowedOrigins")
-            .Get<string[]>() ?? [];
-
-        policy
-        .WithOrigins(allowedOrigins)
-        .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH")
-        .WithHeaders("Content-Type", "Authorization", "X-Tenant-Id")
-        .AllowCredentials();
-    });
-});
-
-
-// ============================================
-// Rate Limiting ← جديد
-// ============================================
-builder.Services.AddRateLimiter(options =>
-{
-    // AuthPolicy
-    options.AddSlidingWindowLimiter("AuthPolicy", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = builder.Configuration
-            .GetValue<int>("RateLimiting:Auth:PermitLimit", 5);
-
-        limiterOptions.Window = TimeSpan.FromSeconds(
-            builder.Configuration.GetValue<int>("RateLimiting:Auth:WindowSeconds", 60));
-
-        limiterOptions.SegmentsPerWindow = 6;
-
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 0;
-    });
-
-    // GlobalPolicy
-    options.AddFixedWindowLimiter("GlobalPolicy", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = builder.Configuration
-            .GetValue<int>("RateLimiting:Global:PermitLimit", 100);
-
-        limiterOptions.Window = TimeSpan.FromSeconds(
-            builder.Configuration.GetValue<int>("RateLimiting:Global:WindowSeconds", 60));
-
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 0;
-    });
-
-    options.OnRejected = async (context, cancellationToken) =>
-    {
-        // 429 = Too Many Requests
-        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-
-        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        // ===============================
+        // 1) Define the JWT Bearer security scheme
+        // ===============================
+        //
+        // This tells Swagger that our API uses JWT Bearer authentication
+        // through the HTTP Authorization header.
+        options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
         {
-            context.HttpContext.Response.Headers.RetryAfter =
-                ((int)retryAfter.TotalSeconds).ToString();
-        }
-
-        // Client رسالة واضحة للـ 
-        context.HttpContext.Response.ContentType = "application/json";
-        await context.HttpContext.Response.WriteAsync(
-            "{\"message\": \"لقد تجاوزت الحد المسموح به من الطلبات. حاول مجدداً لاحقاً.\"}",
-            cancellationToken);
-    };
-});
+            // The name of the HTTP header where the token will be sent.
+            Name = "Authorization",
 
 
-// ============================================
-// AutoMapper
-// ============================================
-builder.Services.AddAutoMapper(typeof(AutoMapperProfile).Assembly);
-
-// ============================================
-// FluentValidation
-// ============================================
-
-builder.Services.AddFluentValidationAutoValidation();
-builder.Services.AddValidatorsFromAssemblyContaining<CreateTenantValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<CreateSubscriberValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<CreatePlanValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<CreateSubscriptionValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<UpdateSubscriberValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<CreateCashPaymentValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<CreateUserValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<UpdateUserValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<ChangePasswordValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<RenewTenantSubscriptionValidator>();
-builder.Services.AddValidatorsFromAssemblyContaining<ConfirmTenantPaymentValidator>();
-
-// ============================================
-// Repository & Unit of Work
-// ============================================
-builder.Services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
-builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
-
-// ============================================
-// Identity Services
-// ============================================
-builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
-builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
-
-// ============================================
-// Business Services
-// ============================================
-builder.Services.AddScoped<ICurrentTenantService, CurrentTenantService>();
-builder.Services.AddScoped<ITenantService, TenantService>();
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<ISubscriberService, SubscriberService>();
-builder.Services.AddScoped<IPlanService, PlanService>();
-builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
-
-// ============================================
-// Phase 2: Telegram & Notification Services
-// ============================================
-builder.Services.AddScoped<ITelegramService, TelegramService>();
-builder.Services.AddScoped<INotificationService, NotificationService>();
-
-// ============================================
-// Phase 2: Background Jobs
-// ============================================
-builder.Services.AddScoped<NotificationJob>();
-builder.Services.AddScoped<SubscriptionStatusJob>();
-builder.Services.AddScoped<RetentionCleanupJob>();
-
-// ============================================
-// Phase 3: Users Management Service
-// ============================================
-builder.Services.AddScoped<IUserService, UserService>();
-
-// ============================================
-// Phase 3: Validators
-// ============================================
+            // Indicates this is an HTTP authentication scheme.
+            Type = SecuritySchemeType.Http,
 
 
-// ============================================
-// Phase 3: Audit Log Service
-// ============================================
-builder.Services.AddScoped<IAuditLogService, AuditLogService>();
-
-// ============================================
-// Payment System Services
-// ============================================
-builder.Services.AddScoped<IPaymentService, PaymentService>();
-builder.Services.AddScoped<IInvoiceService, InvoiceService>();
-
-// ============================================
-// Reports & Analytics Service
-// ============================================
-builder.Services.AddScoped<IReportService, ReportService>();
-
-// ============================================
-// HttpContextAccessor (مطلوب للـ IP Address)
-// ============================================
-builder.Services.AddHttpContextAccessor();
-
-builder.Services.AddControllers();
-
-builder.Services.AddEndpointsApiExplorer();
-// Register Swagger generator and customize its behavior.
-builder.Services.AddSwaggerGen(options =>
-{
-    // ===============================
-    // 1) Define the JWT Bearer security scheme
-    // ===============================
-    //
-    // This tells Swagger that our API uses JWT Bearer authentication
-    // through the HTTP Authorization header.
-    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        // The name of the HTTP header where the token will be sent.
-        Name = "Authorization",
+            // Specifies the authentication scheme name.
+            // Must be exactly "Bearer" for JWT Bearer tokens.
+            Scheme = "Bearer",
 
 
-        // Indicates this is an HTTP authentication scheme.
-        Type = SecuritySchemeType.Http,
+            // Optional metadata to describe the token format.
+            BearerFormat = "JWT",
 
 
-        // Specifies the authentication scheme name.
-        // Must be exactly "Bearer" for JWT Bearer tokens.
-        Scheme = "Bearer",
+            // Specifies that the token is sent in the request header.
+            In = ParameterLocation.Header,
 
 
-        // Optional metadata to describe the token format.
-        BearerFormat = "JWT",
+            // Text shown in Swagger UI to guide the user.
+            Description = "Enter: Bearer {your JWT token}"
+        });
 
 
-        // Specifies that the token is sent in the request header.
-        In = ParameterLocation.Header,
-
-
-        // Text shown in Swagger UI to guide the user.
-        Description = "Enter: Bearer {your JWT token}"
-    });
-
-
-    // ===============================
-    // 2) Require the Bearer scheme for secured endpoints
-    // ===============================
-    //
-    // This tells Swagger that endpoints protected by [Authorize]
-    // require the Bearer token defined above.
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
+        // ===============================
+        // 2) Require the Bearer scheme for secured endpoints
+        // ===============================
+        //
+        // This tells Swagger that endpoints protected by [Authorize]
+        // require the Bearer token defined above.
+        options.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
         {
             new OpenApiSecurityScheme
             {
@@ -327,71 +345,87 @@ builder.Services.AddSwaggerGen(options =>
             // This array is empty because JWT does not use OAuth scopes here.
             new string[] {}
         }
+        });
     });
-});
 
-var app = builder.Build();
+    var app = builder.Build();
 
-// ✅ Log Configuration Summary
-using (var scope = app.Services.CreateScope())
-{
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    builder.Configuration.LogConfigurationSummary(logger);
+    // Log every HTTP request automatically
+    app.UseSerilogRequestLogging(options =>
+    {
+        options.MessageTemplate =
+            "{RequestMethod} {RequestPath} → {StatusCode} ({Elapsed:0.000}ms)";
+    });
+
+    // ✅ Log Configuration Summary
+    using (var scope = app.Services.CreateScope())
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        builder.Configuration.LogConfigurationSummary(logger);
+    }
+
+    // ============================================
+    // Middleware Pipeline
+    // ============================================
+
+    // 1. Exception Handling
+    app.UseExceptionHandling();
+
+    // 2. Swagger (Development)
+    // Configure the HTTP request pipeline.
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
+
+    // 3. HTTPS Redirection
+    app.UseHttpsRedirection();
+
+    // 4. CORS
+    app.UseCors(app.Environment.IsDevelopment()
+        ? "DevelopmentPolicy"  // في بيئة التطوير → سياسة مخففة
+        : "ProductionPolicy"); // في بيئة الإنتاج → سياسة صارمة
+
+    // 5. Rate Limiting
+    app.UseRateLimiter();
+
+    // 6. Authentication
+    app.UseAuthentication(); // ← قبل Authorization
+
+    // 7. Tenant Resolver (بعد Authentication)
+    app.UseTenantResolver();
+
+    // 8. Audit Logging
+    app.UseAuditLogging();
+
+    app.UseAuthorization();
+
+    // ============================================
+    // Hangfire Dashboard
+    // ============================================
+    app.UseHangfireDashboard("/hangfire", new DashboardOptions
+    {
+        // ⚠️ للتطوير فقط - في Production استخدم Authorization
+        Authorization = new[] { new HangfireAuthorizationFilter() }
+    });
+    // ============================================
+    // Schedule Background Jobs
+    // ============================================
+    ConfigureBackgroundJobs(app.Services);
+
+    app.MapControllers();
+
+    app.Run();
 }
-
-// ============================================
-// Middleware Pipeline
-// ============================================
-
-// 1. Exception Handling
-app.UseExceptionHandling();
-
-// 2. Swagger (Development)
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+catch (Exception ex)
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    Log.Fatal(ex, "ISP Managment System faild to start");
 }
-
-// 3. HTTPS Redirection
-app.UseHttpsRedirection();
-
-// 4. CORS
-app.UseCors(app.Environment.IsDevelopment()
-    ? "DevelopmentPolicy"  // في بيئة التطوير → سياسة مخففة
-    : "ProductionPolicy"); // في بيئة الإنتاج → سياسة صارمة
-
-// 5. Rate Limiting
-app.UseRateLimiter();
-
-// 6. Authentication
-app.UseAuthentication(); // ← قبل Authorization
-
-// 7. Tenant Resolver (بعد Authentication)
-app.UseTenantResolver();
-
-// 8. Audit Logging
-app.UseAuditLogging();
-
-app.UseAuthorization();
-
-// ============================================
-// Hangfire Dashboard
-// ============================================
-app.UseHangfireDashboard("/hangfire", new DashboardOptions
+finally
 {
-    // ⚠️ للتطوير فقط - في Production استخدم Authorization
-    Authorization = new[] { new HangfireAuthorizationFilter() }
-});
-// ============================================
-// Schedule Background Jobs
-// ============================================
-ConfigureBackgroundJobs(app.Services);
-
-app.MapControllers();
-
-app.Run();
+    Log.CloseAndFlush();
+}
 
 // ============================================
 // Background Jobs Configuration

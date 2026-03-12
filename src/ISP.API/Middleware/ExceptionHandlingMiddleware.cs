@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace ISP.API.Middleware
@@ -38,10 +39,34 @@ namespace ISP.API.Middleware
 
         private async Task HandleExceptionAsync(HttpContext context, Exception exception)
         {
-            // 1. Logging
-            _logger.LogError(exception, "An unhandled exception occurred: {Message}", exception.Message);
+            // Collect request information for logging
+            var method = context.Request.Method;
+            var path = context.Request.Path;
+            var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "Anonymous";
+            var tenantId = context.User.FindFirst("TenantId")?.Value ?? "-";
 
-            // 2. تحديد Status Code
+            // Log based on exception type
+            switch (exception)
+            {
+                case InvalidOperationException:
+                case KeyNotFoundException:
+                case UnauthorizedAccessException:
+                    // Expected errors — user sent bad data or unauthorized access
+                    _logger.LogWarning(
+                        "Expected exception | {Method} {Path} | User:{UserId} Tenant:{TenantId} | {Message}",
+                        method, path, userId, tenantId, exception.Message);
+                    break;
+
+                default:
+                    // Unexpected errors — real system failure
+                    _logger.LogError(
+                        exception,
+                        "Unhandled exception | {Method} {Path} | User:{UserId} Tenant:{TenantId} | {Message}",
+                        method, path, userId, tenantId, exception.Message);
+                    break;
+            }
+
+            // Determine status code
             var statusCode = exception switch
             {
                 InvalidOperationException => HttpStatusCode.BadRequest,        // 400
@@ -50,26 +75,25 @@ namespace ISP.API.Middleware
                 _ => HttpStatusCode.InternalServerError                        // 500
             };
 
-            // 3. بناء Response
+            // Build response
             var response = new
             {
                 Success = false,
                 Message = exception.Message,
                 StatusCode = (int)statusCode,
-                // StackTrace فقط في Development
+                // Show stack trace in development only
                 StackTrace = _env.IsDevelopment() ? exception.StackTrace : null
             };
 
-            // 4. إرجاع JSON Response
+            // Return JSON response
             context.Response.ContentType = "application/json";
             context.Response.StatusCode = (int)statusCode;
 
-            var json = JsonSerializer.Serialize(response, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            });
-
-            await context.Response.WriteAsync(json);
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(response, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                }));
         }
     }
 
@@ -79,8 +103,6 @@ namespace ISP.API.Middleware
     public static class ExceptionHandlingMiddlewareExtensions
     {
         public static IApplicationBuilder UseExceptionHandling(this IApplicationBuilder builder)
-        {
-            return builder.UseMiddleware<ExceptionHandlingMiddleware>();
-        }
+            => builder.UseMiddleware<ExceptionHandlingMiddleware>();
     }
 }

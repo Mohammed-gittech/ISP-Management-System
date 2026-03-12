@@ -1,6 +1,7 @@
 using AutoMapper;
 using ISP.Application.DTOs;
 using ISP.Application.DTOs.Users;
+using ISP.Application.Helpers;
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Enums;
@@ -111,21 +112,22 @@ namespace ISP.Infrastructure.Services
         // ============================================
         public async Task<UserDto> CreateAsync(CreateUserDto dto)
         {
-            // 1. التحقق من تفرّد Email و Username
+            // 1. Check email uniqueness
             if (!await IsEmailUniqueAsync(dto.Email))
                 throw new InvalidOperationException("البريد الإلكتروني مستخدم مسبقًا");
 
+            // 2. Check username uniqueness
             if (!await IsUsernameUniqueAsync(dto.Username))
                 throw new InvalidOperationException("اسم المستخدم مستخدم مسبقًا");
 
-            // 2. تحويل Role من String إلى Enum
+            // 3. Parse role
             if (!Enum.TryParse<UserRole>(dto.Role, out var roleEnum))
                 throw new InvalidOperationException("الدور غير صحيح");
 
             // 3. Hash Password
             var passwordHash = _passwordHasher.HashPassword(dto.Password);
 
-            // 4. إنشاء Entity
+            // 5. Create entity
             var user = new User
             {
                 TenantId = dto.TenantId,
@@ -137,11 +139,14 @@ namespace ISP.Infrastructure.Services
                 CreatedAt = DateTime.UtcNow
             };
 
-            // 5. حفظ في Database
+            // 6. Save to database
             await _unitOfWork.Users.AddAsync(user);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("User created: {UserId} - {Username}", user.Id, user.Username);
+            // User created successfully
+            _logger.LogInformation(
+                "User created successfully | User:{UserId} | Username:{Username} | Tenant:{TenantId} | Role:{Role}",
+                user.Id, user.Username, user.TenantId, roleEnum);
 
             return await GetByIdAsync(user.Id) ?? throw new Exception("فشل إنشاء المستخدم");
         }
@@ -154,34 +159,51 @@ namespace ISP.Infrastructure.Services
             var user = await _unitOfWork.Users.GetByIdAsync(id);
             if (user == null) return null;
 
-            // تحديث الحقول المرسلة فقط
+            // Track what changed for logging
+            var changes = new List<string>();
+
+            // Update username if provided
             if (!string.IsNullOrWhiteSpace(dto.Username))
             {
                 if (!await IsUsernameUniqueAsync(dto.Username, id))
                     throw new InvalidOperationException("اسم المستخدم مستخدم مسبقًا");
+
+                changes.Add($"Username:{user.Username}→{dto.Username}");
+
                 user.Username = dto.Username;
             }
 
+            // Update email if provided
             if (!string.IsNullOrWhiteSpace(dto.Email))
             {
                 if (!await IsEmailUniqueAsync(dto.Email, id))
                     throw new InvalidOperationException("البريد الإلكتروني مستخدم مسبقًا");
+
+                changes.Add($"Email:{EmailHelper.Mask(user.Email)}→{EmailHelper.Mask(dto.Email)}");
+
                 user.Email = dto.Email;
             }
 
+            // Update active status if provided
             if (dto.IsActive.HasValue)
+            {
+                changes.Add($"IsActive:{user.IsActive}→{dto.IsActive.Value}");
                 user.IsActive = dto.IsActive.Value;
+            }
 
             await _unitOfWork.Users.UpdateAsync(user);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("User updated: {UserId}", id);
+            // User updated successfully
+            _logger.LogInformation(
+                "User updated successfully | User:{UserId} | Tenant:{TenantId} | Changes:{Changes}",
+                id, user.TenantId, string.Join(", ", changes));
 
             return await GetByIdAsync(id);
         }
 
         // ============================================
-        // SOFT DELETE (محدث - حذر!)
+        // SOFT DELETE 
         // ============================================
 
         /// <summary>
@@ -194,32 +216,42 @@ namespace ISP.Infrastructure.Services
             var user = await _unitOfWork.Users.GetByIdAsync(id);
             if (user == null) return false;
 
-            // منع حذف SuperAdmin الوحيد
+            // Prevent deleting last SuperAdmin
             if (user.Role == UserRole.SuperAdmin)
             {
                 var allUsers = await _unitOfWork.Users.GetAllAsync();
                 var superAdminCount = allUsers.Count(u => u.Role == UserRole.SuperAdmin);
 
                 if (superAdminCount <= 1)
+                {
+                    _logger.LogWarning(
+                        "Attempt to delete last SuperAdmin blocked | User:{UserId}",
+                        id);
+
                     throw new InvalidOperationException("لا يمكن حذف آخر SuperAdmin");
+                }
             }
 
-            // منع حذف المستخدم الحالي
+            // Prevent self-deletion
             if (_currentTenantService.UserId.HasValue && _currentTenantService.UserId == id)
             {
+                _logger.LogWarning(
+                    "Self-deletion attempt blocked | User:{UserId}",
+                    id);
+
                 throw new InvalidOperationException("لا يمكنك حذف نفسك");
             }
 
-            _logger.LogWarning("Soft deleting User {UserId} - {Username}", id, user.Username);
-
-            // قبل الحذف Refresh Tokens ← جديد: إلغاء كل   
-            // المستخدم المحذوف لا يجب أن يظل مسجّل الدخول
+            // Revoke all active tokens before soft delete
             await RevokeAllUserTokensAsync(id, "User soft deleted");
 
             await _unitOfWork.Users.SoftDeleteAsync(user);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("User {UserId} soft deleted successfully", id);
+            // User soft deleted successfully
+            _logger.LogWarning(
+                "User soft deleted | User:{UserId} | Username:{Username} | Tenant:{TenantId} | Role:{Role}",
+                id, user.Username, user.TenantId, user.Role);
 
             return true;
         }
@@ -227,28 +259,44 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // RESTORE 
         // ============================================
-
         public async Task<bool> RestoreAsync(int id)
         {
-            _logger.LogInformation("Attempting to restore User {UserId}", id);
-
-            // التحقق من عدم تكرار Email/Username بعد الاسترجاع
             var user = await _unitOfWork.Users.GetByIdIncludingDeletedAsync(id);
 
+            // User not found or not deleted
             if (user == null || !user.IsDeleted)
-                return false;
+            {
+                _logger.LogWarning(
+                    "Restore attempt on non-deleted or missing user | User:{UserId}",
+                    id);
 
-            // التحقق من تفرّد Email/Username (قبل الاسترجاع)
-            var existingEmail = await _unitOfWork.Users.GetAllAsync(u => u.Email == user.Email && u.TenantId == user.TenantId);
+                return false;
+            }
+
+            // Check email uniqueness before restore
+            var existingEmail = await _unitOfWork.Users.GetAllAsync(
+                u => u.Email == user.Email && u.TenantId == user.TenantId);
+
             if (existingEmail.Any())
             {
+                _logger.LogWarning(
+                    "Restore blocked — email conflict | User:{UserId} | Email:{Email}",
+                    id, EmailHelper.Mask(user.Email));
+
                 throw new InvalidOperationException(
                     $"لا يمكن الاسترجاع. البريد الإلكتروني {user.Email} مستخدم من قبل مستخدم آخر");
             }
 
-            var existingUsername = await _unitOfWork.Users.GetAllAsync(u => u.Username == user.Username);
+            // Check username uniqueness before restore
+            var existingUsername = await _unitOfWork.Users.GetAllAsync(
+                u => u.Username == user.Username);
+
             if (existingUsername.Any())
             {
+                _logger.LogWarning(
+                    "Restore blocked — username conflict | User:{UserId} | Username:{Username}",
+                    id, user.Username);
+
                 throw new InvalidOperationException(
                     $"لا يمكن الاسترجاع. اسم المستخدم {user.Username} مستخدم من قبل مستخدم آخر");
             }
@@ -258,7 +306,11 @@ namespace ISP.Infrastructure.Services
             if (restored)
             {
                 await _unitOfWork.SaveChangesAsync();
-                _logger.LogInformation("User {UserId} restored successfully", id);
+
+                // User restored successfully
+                _logger.LogInformation(
+                    "User restored successfully | User:{UserId} | Username:{Username} | Tenant:{TenantId}",
+                    id, user.Username, user.TenantId);
             }
 
             return restored;
@@ -267,7 +319,6 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // GET DELETED 
         // ============================================
-
         public async Task<PagedResultDto<UserDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10)
         {
             var deleted = await _unitOfWork.Users.GetDeletedAsync();
@@ -303,31 +354,39 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // PERMANENT DELETE ( SuperAdmin only)
         // ============================================
-
         public async Task<bool> PermanentDeleteAsync(int id)
         {
-            _logger.LogCritical("PERMANENT DELETE requested for User {UserId}", id);
-
             var user = await _unitOfWork.Users.GetByIdIncludingDeletedAsync(id);
 
             if (user == null)
                 return false;
 
+            // Prevent permanent delete of active user
             if (!user.IsDeleted)
             {
+                _logger.LogWarning(
+                    "Permanent delete attempt on active user blocked | User:{UserId}",
+                    id);
+
                 throw new InvalidOperationException("لا يمكن الحذف النهائي لمستخدم نشط. استخدم Soft Delete أولاً");
             }
 
-            // منع حذف SuperAdmin حتى لو محذوف soft
+            // Prevent permanent delete of SuperAdmin
             if (user.Role == UserRole.SuperAdmin)
             {
+                _logger.LogWarning(
+                    "Permanent delete attempt on SuperAdmin blocked | User:{UserId}",
+                    id);
                 throw new InvalidOperationException("لا يمكن الحذف النهائي لحساب SuperAdmin");
             }
 
             await _unitOfWork.Users.DeleteAsync(user);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogCritical("User {UserId} - {Username} PERMANENTLY DELETED", id, user.Username);
+            // Critical — permanent delete cannot be undone
+            _logger.LogCritical(
+                "User PERMANENTLY DELETED | User:{UserId} | Username:{Username} | Tenant:{TenantId} | Role:{Role}",
+                id, user.Username, user.TenantId, user.Role);
 
             return true;
         }
@@ -335,29 +394,35 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // PASSWORD OPERATIONS
         // ============================================
-
         public async Task<bool> ChangePasswordAsync(int userId, ChangePasswordDto dto)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
             if (user == null) return false;
 
-            // 1. التحقق من كلمة المرور القديمة
+            // Verify old password
             if (!_passwordHasher.VerifyPassword(dto.OldPassword, user.PasswordHash))
-                throw new InvalidOperationException("كلمة المرور القديمة غير صحيحة");
+            {
+                _logger.LogWarning(
+                    "Failed password change attempt — wrong old password | User:{UserId}",
+                    userId);
 
-            // 2. Hash كلمة المرور الجديدة
+                throw new InvalidOperationException("كلمة المرور القديمة غير صحيحة");
+            }
+
+            // Hash new password
             user.PasswordHash = _passwordHasher.HashPassword(dto.NewPassword);
 
             await _unitOfWork.Users.UpdateAsync(user);
 
-            // 3. Refresh Tokens  إلغاء كل 
-            // كلمة المرور تغيّرت → كل الأجهزة يجب أن تعيد تسجيل الدخول
-            // قديم Refresh Token يطرد أي مهاجم يملك  
+            // Revoke all tokens — force re-login on all devices
             await RevokeAllUserTokensAsync(userId, "Password changed by user");
 
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Password changed for user: {UserId}", userId);
+            // Password changed successfully
+            _logger.LogInformation(
+                    "Password changed successfully | User:{UserId} | Tenant:{TenantId}",
+                    userId, user.TenantId);
 
             return true;
         }
@@ -367,18 +432,20 @@ namespace ISP.Infrastructure.Services
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
             if (user == null) return false;
 
+            // Hash new password
             user.PasswordHash = _passwordHasher.HashPassword(dto.NewPassword);
 
             await _unitOfWork.Users.UpdateAsync(user);
 
-            // Refresh Tokens إلغاء كل 
-            // غيّر كلمة المرور → يجب طرد كل الجلسات فوراً Admin
-            // قديم Refresh Token يمنع المهاجم من الاستمرار باستخدام 
+            // Revoke all tokens — force re-login on all devices
             await RevokeAllUserTokensAsync(userId, "Password reset by admin");
 
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Password reset for user: {UserId}", userId);
+            // Password reset successfully
+            _logger.LogWarning(
+                "Password reset by admin | User:{UserId} | Tenant:{TenantId} | Admin:{AdminId}",
+                userId, user.TenantId, _currentTenantService.UserId);
 
             return true;
         }
@@ -386,21 +453,31 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // ASSIGN ROLE
         // ============================================
-
         public async Task<bool> AssignRoleAsync(int userId, string role)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
             if (user == null) return false;
 
+            // Parse new role
             if (!Enum.TryParse<UserRole>(role, out var roleEnum))
+            {
+                _logger.LogWarning(
+                    "Invalid role assignment attempt | User:{UserId} | Role:{Role}",
+                    userId, role);
+
                 throw new InvalidOperationException("الدور غير صحيح");
+            }
+            // Track old role for logging
+            var oldRole = user.Role;
 
             user.Role = roleEnum;
 
             await _unitOfWork.Users.UpdateAsync(user);
             await _unitOfWork.SaveChangesAsync();
-
-            _logger.LogInformation("Role assigned: {UserId} -> {Role}", userId, role);
+            // Role assigned successfully
+            _logger.LogWarning(
+                "Role changed | User:{UserId} | Tenant:{TenantId} | Role:{OldRole}→{NewRole} | Admin:{AdminId}",
+                userId, user.TenantId, oldRole, roleEnum, _currentTenantService.UserId);
 
             return true;
         }
@@ -408,7 +485,6 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // GET USERS BY TENANT
         // ============================================
-
         public async Task<PagedResultDto<UserDto>> GetUsersByTenantAsync(int tenantId, int pageNumber, int pageSize)
         {
             var tenantUsers = await _unitOfWork.Users.GetByTenantAsync(tenantId);
@@ -435,7 +511,6 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // VALIDATION HELPERS
         // ============================================
-
         public async Task<bool> IsEmailUniqueAsync(string email, int? excludeUserId = null)
         {
             var users = await _unitOfWork.Users.GetAllAsync(u => u.Email == email);
