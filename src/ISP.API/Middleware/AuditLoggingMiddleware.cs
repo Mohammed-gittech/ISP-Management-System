@@ -2,6 +2,7 @@
 // AuditLoggingMiddleware.cs - تسجيل تلقائي للعمليات
 // ============================================
 using System.Text;
+using ISP.Application.Helpers;
 using ISP.Application.Interfaces;
 
 namespace ISP.API.Middleware
@@ -79,9 +80,6 @@ namespace ISP.API.Middleware
                     );
                 }
 
-                _logger.LogInformation(
-                    "Request: {Method} {Path} | Status: {StatusCode} | Duration: {Duration}ms",
-                    method, endpoint, statusCode, duration.TotalMilliseconds);
             }
             catch (Exception ex)
             {
@@ -93,7 +91,6 @@ namespace ISP.API.Middleware
                     errorMessage: ex.Message
                 );
 
-                _logger.LogError(ex, "Error in AuditLoggingMiddleware");
                 throw;
             }
             finally
@@ -136,81 +133,107 @@ namespace ISP.API.Middleware
 
             try
             {
-                var doc = System.Text.Json.JsonDocument.Parse(json);
+                var dos = System.Text.Json.JsonDocument.Parse(json);
                 var sanitized = new Dictionary<string, object>();
 
-                foreach (var property in doc.RootElement.EnumerateObject())
+                // Fields to remove completely — never stored anywhere
+                var sensitiveFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    var key = property.Name.ToLower();
+                    // Passwords
+                    "password",
+                    "oldpassword",
+                    "newpassword",
+                    "confirmpassword",
+                    "passwordhash",
 
-                    // قائمة الحقول الحساسة
-                    if (key == "password" ||
-                        key == "oldpassword" ||
-                        key == "newpassword" ||
-                        key == "confirmpassword" ||
-                        key == "passwordhash" ||
-                        key == "token" ||
-                        key == "apikey" ||
-                        key == "secret")
+                    // Tokens
+                    "token",
+                    "refreshtoken",
+                    "accesstoken",
+                    "jwt",
+
+                    // Auth
+                    "authorization",
+                    "cookie",
+                    "sessionid",
+
+                    // Keys
+                    "secret",
+                    "apikey",
+                    "privatekey"
+                };
+
+                // Fields to mask — stored but partially hidden
+                var maskFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "email",
+                    "phonenumber",
+                    "nationalid"
+                };
+
+                foreach (var property in dos.RootElement.EnumerateObject())
+                {
+                    var key = property.Name;
+                    var value = property.Value.ToString();
+
+                    // Group 1 — remove completely
+                    if (sensitiveFields.Contains(key))
+                        continue;
+
+                    // Group 2 — mask
+                    if (maskFields.Contains(key))
                     {
-                        sanitized[property.Name] = "***REDACTED***";
+                        var masked = key.ToLower() switch
+                        {
+                            "email" => EmailHelper.Mask(value),
+                            "phonenumber" => PhoneHelper.Mask(value),
+                            "nationalid" => NationalIdHelper.Mask(value),
+                            _ => value
+                        };
+
+                        sanitized[key] = masked;
+                        continue;
                     }
-                    else
-                    {
-                        sanitized[property.Name] = property.Value.ToString();
-                    }
+                    // Group 3 — store as is
+                    sanitized[key] = value;
                 }
 
                 return System.Text.Json.JsonSerializer.Serialize(sanitized);
             }
             catch
             {
-                // إذا فشل الـ parsing، نرجع النص كما هو
-                return json;
+                // If JSON parsing fails — return empty to avoid storing raw data
+                return string.Empty;
             }
         }
-
-        // private async Task<string> ReadRequestBodyAsync(HttpRequest request)
-        // {
-        //     if (request.ContentLength == null || request.ContentLength == 0)
-        //         return string.Empty;
-
-        //     request.EnableBuffering(); // السماح بقراءة الـ Body أكثر من مرة
-
-        //     using var reader = new StreamReader(
-        //         request.Body,
-        //         encoding: Encoding.UTF8,
-        //         detectEncodingFromByteOrderMarks: false,
-        //         bufferSize: 1024,
-        //         leaveOpen: true);
-
-        //     var body = await reader.ReadToEndAsync();
-        //     request.Body.Position = 0; // إعادة الـ Stream للبداية
-
-        //     return body;
-        // }
 
         // ============================================
         // Helper: تحديد نوع العملية
         // ============================================
-        private string DetermineAction(string method, string path, int statusCode)
+        private string? DetermineAction(string method, string path, int statusCode)
         {
-            // Login/Logout
+            // Login/Logout — always log regardless of method
             if (path.Contains("/auth/login", StringComparison.OrdinalIgnoreCase))
                 return statusCode == 200 ? "Login" : "LoginFailed";
 
             if (path.Contains("/auth/logout", StringComparison.OrdinalIgnoreCase))
                 return "Logout";
 
-            // CRUD Operations
+            if (path.Contains("/auth/refresh", StringComparison.OrdinalIgnoreCase))
+                return "TokenRefresh";
+
+            // GET requests — skip audit logging
+            if (method == "GET")
+                return null;
+
+            // Write operations only
             return method switch
             {
                 "POST" => "Create",
                 "PUT" => "Update",
                 "PATCH" => "Update",
                 "DELETE" => "Delete",
-                "GET" => "View",
-                _ => "Unknown"
+                _ => null
             };
         }
 

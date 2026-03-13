@@ -8,9 +8,6 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using ISP.Domain.Enums;
 using ISP.Application.DTOs.Invoices;
-using Microsoft.EntityFrameworkCore;
-
-
 namespace ISP.Infrastructure.Services
 {
     /// <summary>
@@ -49,6 +46,10 @@ namespace ISP.Infrastructure.Services
             var subscriber = await _unitOfWork.Subscribers.GetByIdAsync(dto.SubscriberId);
             if (subscriber == null)
             {
+                _logger.LogWarning(
+                    "Cash payment failed — subscriber not found | Subscriber:{SubscriberId}",
+                    dto.SubscriberId);
+
                 throw new InvalidOperationException($"المشترك برقم {dto.SubscriberId} غير موجود");
             }
 
@@ -59,11 +60,19 @@ namespace ISP.Infrastructure.Services
                 subscription = await _unitOfWork.Subscriptions.GetByIdAsync(dto.SubscriptionId.Value);
                 if (subscription == null)
                 {
+                    _logger.LogWarning(
+                        "Cash payment failed — subscription not found | Subscription:{SubscriptionId}",
+                        dto.SubscriptionId);
+
                     throw new InvalidOperationException($"الاشتراك برقم {dto.SubscriptionId} غير موجود");
                 }
 
                 if (subscription.SubscriberId != dto.SubscriberId)
                 {
+                    _logger.LogWarning(
+                        "Cash payment failed — subscription does not belong to subscriber | Subscription:{SubscriptionId} | Subscriber:{SubscriberId}",
+                        dto.SubscriptionId, dto.SubscriberId);
+
                     throw new InvalidOperationException("الاشتراك لا يخص هذا المشترك");
                 }
             }
@@ -89,7 +98,9 @@ namespace ISP.Infrastructure.Services
             await _unitOfWork.Payments.AddAsync(payment);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Cash payment {PaymentId} created successfully", payment.Id);
+            _logger.LogInformation(
+                "Cash payment created successfully | Payment:{PaymentId} | Tenant:{TenantId}",
+                payment.Id, payment.TenantId);
 
             // 4. إنشاء فاتورة (إذا طُلب)
             Invoice? invoice = null;
@@ -101,7 +112,8 @@ namespace ISP.Infrastructure.Services
                 await _unitOfWork.Payments.UpdateAsync(payment);
                 await _unitOfWork.SaveChangesAsync();
 
-                _logger.LogInformation("Invoice {InvoiceNumber} created for payment {PaymentId}",
+                _logger.LogInformation(
+                    "Invoice {InvoiceNumber} created for payment {PaymentId}",
                     invoice.InvoiceNumber, payment.Id);
             }
 
@@ -127,8 +139,9 @@ namespace ISP.Infrastructure.Services
                     subscriptionRenewed = true;
                     newEndDate = subscription.EndDate;
 
-                    _logger.LogInformation("Subscription {SubscriptionId} renewed until {EndDate}",
-                        subscription.Id, newEndDate);
+                    _logger.LogInformation(
+                        "Subscription renewed | Subscription:{SubscriptionId} | EndDate:{EndDate}",
+                        subscription.Id, newEndDate?.ToString("yyyy-MM-dd"));
                 }
             }
 
@@ -226,7 +239,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // Helper: Generate Invoice Number (DATABASE-SAFE) ⭐⭐⭐
+        // Helper: Generate Invoice Number (DATABASE-SAFE) 
         // ============================================
 
         private async Task<string> GenerateInvoiceNumberAsync()
@@ -242,7 +255,7 @@ namespace ISP.Infrastructure.Services
             await _unitOfWork.BeginTransactionAsync(); // ⭐ بدون using
             try
             {
-                // ⭐ الخطوة 1: جلب/إنشاء العداد
+                // Get or create counter
                 var counter = await _unitOfWork.InvoiceCounters
                     .GetAllAsync(c => c.TenantId == tenantId && c.Year == year)
                     .ContinueWith(t => t.Result.FirstOrDefault());
@@ -263,14 +276,14 @@ namespace ISP.Infrastructure.Services
                     await _unitOfWork.SaveChangesAsync();
                 }
 
-                // ⭐ الخطوة 2: زيادة العداد
+                // Increment counter
                 counter.LastNumber++;
                 counter.UpdatedAt = DateTime.UtcNow;
 
                 await _unitOfWork.InvoiceCounters.UpdateAsync(counter);
                 await _unitOfWork.SaveChangesAsync();
 
-                // ⭐ الخطوة 3: Commit Transaction
+                //  الخطوة 3: Commit Transaction
                 await _unitOfWork.CommitTransactionAsync();
 
                 // توليد رقم الفاتورة
@@ -405,20 +418,37 @@ namespace ISP.Infrastructure.Services
         // ============================================
         // Refunds
         // ============================================
-
         public async Task<PaymentDto> RefundPaymentAsync(int paymentId, decimal? amount = null, string? reason = null)
         {
             var payment = await _unitOfWork.Payments.GetByIdAsync(paymentId);
             if (payment == null)
+            {
+                _logger.LogWarning(
+                    "Refund failed — payment not found | Payment:{PaymentId}",
+                    paymentId);
+
                 throw new InvalidOperationException($"الدفعة برقم {paymentId} غير موجود");
+            }
 
             if (payment.Status == "Refunded")
+            {
+                _logger.LogWarning(
+                    "Refund failed — already refunded | Payment:{PaymentId}",
+                    paymentId);
+
                 throw new InvalidOperationException("الدفعة مستردة مسبقاً");
+            }
 
             var refundAmount = amount ?? payment.Amount;
 
             if (refundAmount > payment.Amount)
+            {
+                _logger.LogWarning(
+                    "Refund failed — amount exceeds original | Payment:{PaymentId} | Refund:{Refund} | Original:{Original}",
+                    paymentId, refundAmount, payment.Amount);
+
                 throw new InvalidOperationException("مبلغ الاسترداد أكبر من مبلغ الدفعة");
+            }
 
             payment.Status = refundAmount == payment.Amount ? "Refunded" : "PartiallyRefunded";
             payment.Notes = $"{payment.Notes}\nاسترداد: {refundAmount} - {reason}";
@@ -426,7 +456,7 @@ namespace ISP.Infrastructure.Services
 
             await _unitOfWork.Payments.UpdateAsync(payment);
 
-            // تحديث الفاتورة
+            // Update related invoice
             if (payment.InvoiceId.HasValue)
             {
                 var invoice = await _unitOfWork.Invoices.GetByIdAsync(payment.InvoiceId.Value);
@@ -440,7 +470,10 @@ namespace ISP.Infrastructure.Services
 
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Payment {PaymentId} refunded: {Amount}", paymentId, refundAmount);
+            // Refund is a financial reversal — use Warning
+            _logger.LogWarning(
+                "Payment refunded | Payment:{PaymentId} | Tenant:{TenantId} | Amount:{Amount} | Reason:{Reason}",
+                paymentId, payment.TenantId, refundAmount, reason);
 
             return (await GetPaymentByIdAsync(paymentId))!;
         }

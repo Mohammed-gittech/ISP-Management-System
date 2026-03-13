@@ -1,10 +1,12 @@
 using AutoMapper;
 using ISP.Application.DTOs;
 using ISP.Application.DTOs.Tenants;
+using ISP.Application.Helpers;
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Enums;
 using ISP.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace ISP.Infrastructure
 {
@@ -16,15 +18,18 @@ namespace ISP.Infrastructure
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
         private readonly IPasswordHasher _passwordHasher;
+        private readonly ILogger<TenantService> _logger;
 
         public TenantService(
             IUnitOfWork unitOfWork,
             IMapper mapper,
-            IPasswordHasher passwordHasher)
+            IPasswordHasher passwordHasher,
+            ILogger<TenantService> logger)
         {
             _unitOfWork = unitOfWork;
             _mapper = mapper;
             _passwordHasher = passwordHasher;
+            _logger = logger;
         }
 
         /// <summary>
@@ -32,21 +37,26 @@ namespace ISP.Infrastructure
         /// </summary>
         public async Task<TenantDto> CreateAsync(CreateTenantDto dto)
         {
-            // 1. التحقق من عدم وجود Email مكرر
+            // Check for duplicate email
             var existingTenants = await _unitOfWork.Tenants.GetAllAsync(t => t.ContactEmail == dto.ContactEmail);
+
             if (existingTenants.Any())
             {
+                _logger.LogWarning(
+                    "Tenant creation failed — duplicate email | Email:{Email}",
+                    EmailHelper.Mask(dto.ContactEmail));
+
                 throw new InvalidOperationException("البريد الإلكتروني موجود مسبقاً");
             }
 
-            // 2. إنشاء Tenant
+            // Create tenant
             var tenant = _mapper.Map<Tenant>(dto);
             tenant.CreatedAt = DateTime.UtcNow;
 
-            // ✅ Free مفعل فوراً — غيره ينتظر الدفع
+            // Free 
             tenant.IsActive = dto.SubscriptionPlan == TenantPlan.Free;
 
-            // تحديد MaxSubscribers حسب الباقة
+            // MaxSubscribers  
             tenant.MaxSubscribers = dto.SubscriptionPlan switch
             {
                 TenantPlan.Free => 50,
@@ -57,7 +67,7 @@ namespace ISP.Infrastructure
 
             await _unitOfWork.Tenants.AddAsync(tenant);
 
-            // 3. إنشاء TenantSubscription
+            // Create tenant subscription
             var subscription = new TenantSubscription
             {
                 Tenant = tenant,
@@ -71,7 +81,6 @@ namespace ISP.Infrastructure
                 },
                 StartDate = DateTime.UtcNow,
                 EndDate = dto.SubscriptionPlan == TenantPlan.Free ? DateTime.UtcNow.AddMonths(1) : DateTime.UtcNow.AddMonths(dto.DurationMonths),
-                // ✅ Free مفعل — غيره Pending حتى الدفع
                 Status = dto.SubscriptionPlan == TenantPlan.Free
                     ? TenantSubscriptionStatus.Active
                     : TenantSubscriptionStatus.Pending,
@@ -80,7 +89,7 @@ namespace ISP.Infrastructure
 
             await _unitOfWork.TenantSubscriptions.AddAsync(subscription);
 
-            // 4. إنشاء Admin User
+            // Create admin user
             var adminUser = new User
             {
                 Tenant = tenant,
@@ -93,9 +102,12 @@ namespace ISP.Infrastructure
             };
 
             await _unitOfWork.Users.AddAsync(adminUser);
-
-            // 5. حفظ الكل
             await _unitOfWork.SaveChangesAsync();
+
+            // Tenant created successfully
+            _logger.LogInformation(
+                "Tenant created successfully | Tenant:{TenantId} | Name:{Name} | Plan:{Plan} | IsActive:{IsActive}",
+                tenant.Id, tenant.Name, dto.SubscriptionPlan, tenant.IsActive);
 
             return _mapper.Map<TenantDto>(tenant);
         }
@@ -130,31 +142,61 @@ namespace ISP.Infrastructure
             var tenant = await _unitOfWork.Tenants.GetByIdAsync(id);
 
             if (tenant == null)
-                throw new InvalidOperationException("الوكيل غير موجود");
+            {
+                _logger.LogWarning(
+                    "Tenant update failed — not found | Tenant:{TenantId}",
+                    id);
 
-            if (!string.IsNullOrEmpty(dto.Name))
-                tenant.Name = dto.Name;
+                throw new InvalidOperationException("الوكيل غير موجود");
+            }
+
+            // Track changes for logging
+            var changes = new List<string>();
 
             if (!string.IsNullOrEmpty(dto.ContactEmail))
+            {
+                changes.Add($"Email:{EmailHelper.Mask(tenant.ContactEmail)}→{EmailHelper.Mask(dto.ContactEmail)}");
                 tenant.ContactEmail = dto.ContactEmail;
+            }
 
             if (dto.ContactPhone != null)
+            {
+                changes.Add($"Phone:{PhoneHelper.Mask(tenant.ContactPhone)}→{PhoneHelper.Mask(dto.ContactPhone)}");
                 tenant.ContactPhone = dto.ContactPhone;
+            }
 
             if (dto.TelegramBotToken != null)
+            {
+                // Do not log token value — sensitive data
+                changes.Add("TelegramBotToken:updated");
                 tenant.TelegramBotToken = dto.TelegramBotToken;
+            }
 
             if (dto.Address != null)
+            {
+                changes.Add($"Address:updated");
                 tenant.Address = dto.Address;
+            }
 
             if (dto.City != null)
+            {
+                changes.Add($"City:{tenant.City}→{dto.City}");
                 tenant.City = dto.City;
+            }
 
             if (dto.Country != null)
+            {
+                changes.Add($"Country:{tenant.Country}→{dto.Country}");
                 tenant.Country = dto.Country;
+            }
 
             await _unitOfWork.Tenants.UpdateAsync(tenant);
             await _unitOfWork.SaveChangesAsync();
+
+            // Tenant updated successfully
+            _logger.LogInformation(
+                "Tenant updated successfully | Tenant:{TenantId} | Changes:{Changes}",
+                id, string.Join(", ", changes));
         }
 
         public async Task<bool> DeactivateAsync(int id)
@@ -162,12 +204,22 @@ namespace ISP.Infrastructure
             var tenant = await _unitOfWork.Tenants.GetByIdAsync(id);
 
             if (tenant == null)
+            {
+                _logger.LogWarning(
+                    "Tenant deactivation failed — not found | Tenant:{TenantId}",
+                    id);
                 return false;
+            }
 
             tenant.IsActive = false;
 
             await _unitOfWork.Tenants.UpdateAsync(tenant);
             await _unitOfWork.SaveChangesAsync();
+
+            // Deactivating a tenant affects all its users — critical event
+            _logger.LogWarning(
+                "Tenant deactivated | Tenant:{TenantId} | Name:{Name}",
+                id, tenant.Name);
 
             return true;
         }
@@ -177,12 +229,21 @@ namespace ISP.Infrastructure
             var tenant = await _unitOfWork.Tenants.GetByIdAsync(id);
 
             if (tenant == null)
+            {
+                _logger.LogWarning(
+                    "Tenant activation failed — not found | Tenant:{TenantId}",
+                    id);
                 return false;
+            }
 
             tenant.IsActive = true;
 
             await _unitOfWork.Tenants.UpdateAsync(tenant);
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Tenant activated | Tenant:{TenantId} | Name:{Name}",
+                id, tenant.Name);
 
             return true;
         }
@@ -210,20 +271,33 @@ namespace ISP.Infrastructure
         /// </summary>
         public async Task<TenantSubscriptionDto> RenewRequestAsync(int tenantId, RenewTenantSubscriptionDto dto)
         {
-            // 1. التحقق من وجود الـ Tenant
+            // Check tenant exists
             var tenant = await _unitOfWork.Tenants.GetByIdAsync(tenantId);
-            if (tenant == null)
-                throw new InvalidOperationException("الوكيل غير موجود");
 
-            // 2. التحقق من عدم وجود طلب معلق مسبقاً
+            if (tenant == null)
+            {
+                _logger.LogWarning(
+                    "Renewal request failed — tenant not found | Tenant:{TenantId}",
+                    tenantId);
+
+                throw new InvalidOperationException("الوكيل غير موجود");
+            }
+
+            // Check for existing pending request
             var existingPending = await _unitOfWork.TenantSubscriptions
                 .GetAllAsync(s => s.TenantId == tenantId
                                 && s.Status == TenantSubscriptionStatus.Pending);
 
             if (existingPending.Any())
-                throw new InvalidOperationException("يوجد طلب تجديد معلق بالفعل — انتظر تأكيد SuperAdmin");
+            {
+                _logger.LogWarning(
+                    "Renewal request failed — pending request already exists | Tenant:{TenantId}",
+                    tenantId);
 
-            // 3. إنشاء TenantSubscription جديد بـ Status = Pending
+                throw new InvalidOperationException("يوجد طلب تجديد معلق بالفعل — انتظر تأكيد SuperAdmin");
+            }
+
+            // Create new pending subscription
             var subscription = new TenantSubscription
             {
                 TenantId = tenantId,
@@ -244,9 +318,12 @@ namespace ISP.Infrastructure
             };
 
             await _unitOfWork.TenantSubscriptions.AddAsync(subscription);
-
-            // 4. حفظ
             await _unitOfWork.SaveChangesAsync();
+
+            // Renewal request created
+            _logger.LogInformation(
+                "Renewal request created | Tenant:{TenantId} | Name:{Name} | Plan:{Plan} | Price:{Price}",
+                tenantId, tenant.Name, dto.Plan, subscription.Price);
 
             return _mapper.Map<TenantSubscriptionDto>(subscription);
         }
@@ -257,29 +334,47 @@ namespace ISP.Infrastructure
         /// </summary>
         public async Task ConfirmPaymentAsync(int tenantId, ConfirmTenantPaymentDto dto)
         {
-            // 1. جلب TenantSubscription المعلق بالـ Id
+            // Find pending subscription
             var subscription = await _unitOfWork.TenantSubscriptions
                 .GetByIdAsync(dto.SubscriptionId);
 
             if (subscription == null)
+            {
+                _logger.LogWarning(
+                    "Payment confirmation failed — subscription not found | Subscription:{SubscriptionId}",
+                    dto.SubscriptionId);
+
                 throw new InvalidOperationException("الاشتراك غير موجود");
+            }
 
-            // 2. التحقق أنه Pending — لا نؤكد اشتراكاً مفعلاً مسبقاً
+            // Must be pending
             if (subscription.Status != TenantSubscriptionStatus.Pending)
+            {
+                _logger.LogWarning(
+                    "Payment confirmation failed — subscription not pending | Subscription:{SubscriptionId} | Status:{Status}",
+                    dto.SubscriptionId, subscription.Status);
+
                 throw new InvalidOperationException("هذا الاشتراك ليس في حالة انتظار");
+            }
 
-            // 3. التحقق أن الاشتراك يخص هذا الـ Tenant
+            // Must belong to this tenant
             if (subscription.TenantId != tenantId)
-                throw new InvalidOperationException("الاشتراك لا يخص هذا الوكيل");
+            {
+                _logger.LogWarning(
+                    "Payment confirmation failed — subscription does not belong to tenant | Subscription:{SubscriptionId} | Tenant:{TenantId}",
+                    dto.SubscriptionId, tenantId);
 
-            // 4. تحديث TenantSubscription
+                throw new InvalidOperationException("الاشتراك لا يخص هذا الوكيل");
+            }
+
+            // Activate subscription
             subscription.Status = TenantSubscriptionStatus.Active;
             subscription.LastPaymentDate = DateTime.UtcNow;
             subscription.PaymentMethod = dto.PaymentMethod;
 
             await _unitOfWork.TenantSubscriptions.UpdateAsync(subscription);
 
-            // 5. إنشاء TenantPayment — سجل مالي كامل
+            // Create payment record
             var payment = new TenantPayment
             {
                 TenantId = tenantId,
@@ -297,17 +392,21 @@ namespace ISP.Infrastructure
 
             await _unitOfWork.TenantPayments.AddAsync(payment);
 
-            // 6. تفعيل الـ Tenant
+            // Activate tenant
             var tenant = await _unitOfWork.Tenants.GetByIdAsync(tenantId);
             if (tenant == null)
                 throw new InvalidOperationException("الوكيل غير موجود");
 
             tenant.IsActive = true;
-            await _unitOfWork.Tenants.UpdateAsync(tenant);
 
-            // 7. حفظ الكل في SaveChanges واحد
-            // لو واحد فشل → كلهم Rollback
+            await _unitOfWork.Tenants.UpdateAsync(tenant);
             await _unitOfWork.SaveChangesAsync();
+
+            // Payment confirmed — critical financial event
+            _logger.LogWarning(
+                "Payment confirmed | Tenant:{TenantId} | Name:{Name} | Plan:{Plan} | Amount:{Amount} | Method:{Method} | Transaction:{TransactionId}",
+                tenantId, tenant.Name, subscription.Plan, subscription.Price,
+                dto.PaymentMethod, dto.TransactionId);
         }
 
         /// <summary>

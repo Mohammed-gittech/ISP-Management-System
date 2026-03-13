@@ -48,12 +48,20 @@ namespace ISP.Infrastructure.Services.Notifications
                 var subscriber = await _unitOfWork.Subscribers.GetByIdAsync(subscriberId);
                 if (subscriber == null)
                 {
+                    _logger.LogWarning(
+                        "Notification failed — subscriber not found | Subscriber:{SubscriberId}",
+                        subscriberId);
+
                     throw new InvalidOperationException($"Subscriber with ID {subscriberId} not found");
                 }
 
                 // 2. التحقق من TenantId Match
                 if (subscriber.TenantId != tenantId)
                 {
+                    _logger.LogWarning(
+                        "Notification failed — subscriber does not belong to tenant | Subscriber:{SubscriberId} | Tenant:{TenantId}",
+                        subscriberId, tenantId);
+
                     throw new InvalidOperationException(
                         $"Subscriber {subscriberId} does not belong to Tenant {tenantId}");
                 }

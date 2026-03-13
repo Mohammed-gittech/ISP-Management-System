@@ -38,50 +38,71 @@ namespace ISP.Infrastructure.Services
 
         public async Task<SubscriptionDto> CreateAsync(CreateSubscriptionDto dto)
         {
-            // 1. التحقق من المشترك
+            // Check subscriber exists
             var subscriber = await _unitOfWork.Subscribers.GetByIdAsync(dto.SubscriberId);
             if (subscriber == null)
                 throw new InvalidOperationException("المشترك غير موجود");
 
-            // 2. التحقق من الباقة
+            // Check plan exists and active
             var plan = await _unitOfWork.Plans.GetByIdAsync(dto.PlanId);
             if (plan == null || !plan.IsActive)
-                throw new InvalidOperationException("الباقة غير موجودة أو غير نشطة");
+            {
+                _logger.LogWarning(
+                    "Subscription creation failed — plan not found or inactive | Plan:{PlanId}",
+                    dto.PlanId);
 
-            // 3. إنشاء الاشتراك
+                throw new InvalidOperationException("الباقة غير موجودة أو غير نشطة");
+            }
+
+            // Create subscription
             var subscription = _mapper.Map<Subscription>(dto);
             subscription.TenantId = _currentTenant.TenantId;
             subscription.Plan = plan;
             subscription.CreatedAt = DateTime.UtcNow;
 
-            // 4. حساب تاريخ الانتهاء
             subscription.CalculateEndDate();
 
-            // 5. تحديد الحالة
             subscription.UpdateStatus();
 
-            // 6. حفظ
             await _unitOfWork.Subscriptions.AddAsync(subscription);
             await _unitOfWork.SaveChangesAsync();
+
+            // Subscription created successfully
+            _logger.LogInformation(
+                "Subscription created | Subscription:{SubscriptionId} | Subscriber:{SubscriberId} | Plan:{PlanId} | Tenant:{TenantId} | EndDate:{EndDate}",
+                subscription.Id, dto.SubscriberId, dto.PlanId,
+                subscription.TenantId, subscription.EndDate.ToString("yyyy-MM-dd"));
 
             return _mapper.Map<SubscriptionDto>(subscription);
         }
 
         public async Task<SubscriptionDto> RenewAsync(RenewSubscriptionDto dto)
         {
-            // 1. الحصول على الاشتراك القديم
+            // Check old subscription exists
             var oldSubscription = await _unitOfWork.Subscriptions.GetByIdAsync(dto.SubscriptionId);
             if (oldSubscription == null)
-                throw new InvalidOperationException("الاشتراك غير موجود");
+            {
+                _logger.LogWarning(
+                    "Subscription renewal failed — not found | Subscription:{SubscriptionId}",
+                    dto.SubscriptionId);
 
-            // 2. تحديد الباقة (نفسها أو جديدة)
+                throw new InvalidOperationException("الاشتراك غير موجود");
+            }
+
+            // Determine plan
             var planId = dto.NewPlanId ?? oldSubscription.PlanId;
             var plan = await _unitOfWork.Plans.GetByIdAsync(planId);
 
             if (plan == null || !plan.IsActive)
-                throw new InvalidOperationException("الباقة غير صالحة");
+            {
+                _logger.LogWarning(
+                    "Subscription renewal failed — plan not found or inactive | Plan:{PlanId}",
+                    planId);
 
-            // 3. إنشاء اشتراك جديد
+                throw new InvalidOperationException("الباقة غير صالحة");
+            }
+
+            // Create new subscription
             var newSubscription = new Subscription
             {
                 TenantId = _currentTenant.TenantId,
@@ -97,12 +118,18 @@ namespace ISP.Infrastructure.Services
             newSubscription.CalculateEndDate();
             newSubscription.UpdateStatus();
 
-            // 4. تحديث الاشتراك القديم (Soft Delete)
+            // Soft delete old subscription
             await _unitOfWork.Subscriptions.SoftDeleteAsync(oldSubscription);
 
-            // 5. حفظ الجديد
+            // Save new subscription
             await _unitOfWork.Subscriptions.AddAsync(newSubscription);
             await _unitOfWork.SaveChangesAsync();
+
+            // Subscription renewed successfully
+            _logger.LogInformation(
+                "Subscription renewed | Old:{OldSubscriptionId} → New:{NewSubscriptionId} | Subscriber:{SubscriberId} | Plan:{PlanId} | Tenant:{TenantId} | EndDate:{EndDate}",
+                dto.SubscriptionId, newSubscription.Id, newSubscription.SubscriberId,
+                planId, newSubscription.TenantId, newSubscription.EndDate.ToString("yyyy-MM-dd"));
 
             return _mapper.Map<SubscriptionDto>(newSubscription);
         }
@@ -208,7 +235,7 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // SOFT DELETE (محدث)
+        // SOFT DELETE 
         // ============================================
 
         /// <summary>
@@ -219,38 +246,59 @@ namespace ISP.Infrastructure.Services
             var subscription = await _unitOfWork.Subscriptions.GetByIdAsync(id);
 
             if (subscription == null)
-                return false;
+            {
+                _logger.LogWarning(
+                    "Subscription cancellation failed — not found | Subscription:{SubscriptionId}",
+                    id);
 
-            _logger.LogInformation("Canceling (soft deleting) Subscription {SubscriptionId}", id);
+                return false;
+            }
 
             // Soft Delete
             await _unitOfWork.Subscriptions.SoftDeleteAsync(subscription);
             await _unitOfWork.SaveChangesAsync();
 
+            // Subscription cancelled
+            _logger.LogWarning(
+                "Subscription cancelled | Subscription:{SubscriptionId} | Subscriber:{SubscriberId} | Tenant:{TenantId} | Plan:{PlanId}",
+                id, subscription.SubscriberId, subscription.TenantId, subscription.PlanId);
+
             return true;
         }
 
         // ============================================
-        // RESTORE (جديد)
+        // RESTORE 
         // ============================================
 
         public async Task<bool> RestoreAsync(int id)
         {
-            _logger.LogInformation("Attempting to restore Subscription {SubscriptionId}", id);
+            var subscription = await _unitOfWork.Subscriptions.GetByIdIncludingDeletedAsync(id);
+
+            if (subscription == null || !subscription.IsDeleted)
+            {
+                _logger.LogWarning(
+                    "Subscription restore failed — not found or not deleted | Subscription:{SubscriptionId}",
+                    id);
+
+                return false;
+            }
 
             var restored = await _unitOfWork.Subscriptions.RestoreByIdAsync(id);
 
             if (restored)
             {
                 await _unitOfWork.SaveChangesAsync();
-                _logger.LogInformation("Subscription {SubscriptionId} restored successfully", id);
+
+                _logger.LogInformation(
+                    "Subscription restored | Subscription:{SubscriptionId} | Subscriber:{SubscriberId} | Tenant:{TenantId}",
+                    id, subscription.SubscriberId, subscription.TenantId);
             }
 
             return restored;
         }
 
         // ============================================
-        // GET DELETED (جديد)
+        // GET DELETED 
         // ============================================
 
         public async Task<PagedResultDto<SubscriptionDto>> GetDeletedAsync(int pageNumber = 1, int pageSize = 10)
@@ -274,27 +322,38 @@ namespace ISP.Infrastructure.Services
         }
 
         // ============================================
-        // PERMANENT DELETE (جديد)
+        // PERMANENT DELETE 
         // ============================================
 
         public async Task<bool> PermanentDeleteAsync(int id)
         {
-            _logger.LogWarning("Permanent delete requested for Subscription {SubscriptionId}", id);
-
             var subscription = await _unitOfWork.Subscriptions.GetByIdIncludingDeletedAsync(id);
 
             if (subscription == null)
+            {
+                _logger.LogWarning(
+                    "Subscription permanent delete failed — not found | Subscription:{SubscriptionId}",
+                    id);
+
                 return false;
+            }
 
             if (!subscription.IsDeleted)
             {
-                throw new InvalidOperationException(" أولاً Cancel لا يمكن الحذف النهائي لاشتراك نشط. استخدم ");
+                _logger.LogWarning(
+                    "Subscription permanent delete blocked — not cancelled | Subscription:{SubscriptionId}",
+                    id);
+
+                throw new InvalidOperationException("لا يمكن الحذف النهائي لاشتراك نشط. استخدم Cancel أولاً");
             }
 
             await _unitOfWork.Subscriptions.DeleteAsync(subscription);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogWarning("Subscription {SubscriptionId} permanently deleted", id);
+            // Critical — cannot be undone
+            _logger.LogCritical(
+                "Subscription PERMANENTLY DELETED | Subscription:{SubscriptionId} | Subscriber:{SubscriberId} | Tenant:{TenantId} | Plan:{PlanId}",
+                id, subscription.SubscriberId, subscription.TenantId, subscription.PlanId);
 
             return true;
         }

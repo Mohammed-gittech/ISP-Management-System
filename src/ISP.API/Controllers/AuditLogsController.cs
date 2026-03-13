@@ -165,7 +165,14 @@ namespace ISP.API.Controllers
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
         public async Task<IActionResult> GetStatistics([FromQuery] int? tenantId = null)
         {
-            var filter = new AuditLogFilterDto { TenantId = tenantId };
+            // Fetch all records without pagination for accurate statistics
+            var filter = new AuditLogFilterDto
+            {
+                TenantId = tenantId,
+                PageNumber = 1,
+                PageSize = int.MaxValue // ← جلب كل السجلات
+            };
+
             var allLogs = await _auditLogService.GetAllAsync(filter);
 
             var stats = new
@@ -173,14 +180,19 @@ namespace ISP.API.Controllers
                 totalLogs = allLogs.TotalCount,
                 successfulOperations = allLogs.Items.Count(l => l.Success),
                 failedOperations = allLogs.Items.Count(l => !l.Success),
+
                 actionBreakdown = allLogs.Items
                     .GroupBy(l => l.Action)
                     .Select(g => new { action = g.Key, count = g.Count() })
+                    .OrderByDescending(x => x.count)
                     .ToList(),
+
                 entityBreakdown = allLogs.Items
                     .GroupBy(l => l.EntityType)
                     .Select(g => new { entityType = g.Key, count = g.Count() })
+                    .OrderByDescending(x => x.count)
                     .ToList(),
+
                 topUsers = allLogs.Items
                     .GroupBy(l => l.Username)
                     .OrderByDescending(g => g.Count())

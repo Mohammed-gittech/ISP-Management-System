@@ -1,6 +1,7 @@
 using AutoMapper;
 using ISP.Application.DTOs;
 using ISP.Application.DTOs.Subscribers;
+using ISP.Application.Helpers;
 using ISP.Application.Interfaces;
 using ISP.Domain.Entities;
 using ISP.Domain.Enums;
@@ -40,42 +41,54 @@ namespace ISP.Infrastructure.Services
         public async Task<SubscriberDto> CreateAsync(CreateSubscriberDto dto)
         {
 
-            // جلب Tenant الحالي
+            // Check tenant exists
             var tenant = await _unitOfWork.Tenants.GetByIdAsync(_currentTenant.TenantId);
 
             if (tenant == null)
             {
+                _logger.LogWarning(
+                    "Subscriber creation failed — tenant not found | Tenant:{TenantId}",
+                    _currentTenant.TenantId);
+
                 throw new InvalidOperationException("Tenant غير موجود");
             }
 
-            // عدّ المشتركين الحاليين (النشطين فقط)
+            // Check subscriber limit
             var currentSubscribersCount = await _unitOfWork.Subscribers.CountAsync();
 
-            // التحقق من الحد الأقصى
             if (currentSubscribersCount >= tenant.MaxSubscribers)
             {
+                _logger.LogWarning(
+                    "Subscriber creation failed — limit reached | Tenant:{TenantId} | Count:{Count} | Max:{Max}",
+                    _currentTenant.TenantId, currentSubscribersCount, tenant.MaxSubscribers);
+
                 throw new InvalidOperationException(
                     $"تم الوصول للحد الأقصى من المشتركين ({tenant.MaxSubscribers}). " +
                     $"يرجى ترقية خطة الاشتراك للإضافة المزيد.");
             }
-            // 1. Validation: التحقق من عدم وجود رقم هاتف مكرر
+
+            // Check duplicate phone
             if (await PhoneNumberExistsAsync(dto.PhoneNumber))
             {
+                _logger.LogWarning(
+                    "Subscriber creation failed — duplicate phone | Tenant:{TenantId} | Phone:{Phone}",
+                    _currentTenant.TenantId, PhoneHelper.Mask(dto.PhoneNumber));
+
                 throw new InvalidOperationException($"رقم الهاتف {dto.PhoneNumber} موجود مسبقاً");
             }
 
-            // 2. Map DTO → Entity
+            // Create subscriber
             var subscriber = _mapper.Map<Subscriber>(dto);
-
-            // 3. تعيين TenantId (Multi-Tenancy)
             subscriber.TenantId = _currentTenant.TenantId;
-
-            // 4. تعيين تاريخ التسجيل
             subscriber.RegistrationDate = DateTime.UtcNow;
 
-            // 5. حفظ في Database
             await _unitOfWork.Subscribers.AddAsync(subscriber);
             await _unitOfWork.SaveChangesAsync();
+
+            // Subscriber created successfully
+            _logger.LogInformation(
+                "Subscriber created successfully | Subscriber:{SubscriberId} | Tenant:{TenantId} | Phone:{Phone}",
+                subscriber.Id, subscriber.TenantId, PhoneHelper.Mask(subscriber.PhoneNumber));
 
             return _mapper.Map<SubscriberDto>(subscriber);
         }
@@ -146,40 +159,74 @@ namespace ISP.Infrastructure.Services
 
             if (subscriber == null)
             {
+                _logger.LogWarning(
+                    "Subscriber update failed — not found | Subscriber:{SubscriberId}",
+                    id);
+
                 throw new InvalidOperationException($"المشترك برقم {id} غير موجود");
             }
 
-            // 2. التحقق من رقم الهاتف (إذا تم تعديله)
+            // Track changes for logging
+            var changes = new List<string>();
+
+            // Update full name
+            if (!string.IsNullOrEmpty(dto.FullName))
+            {
+                changes.Add("FullName:updated");
+                subscriber.FullName = dto.FullName;
+            }
+
+            // Update phone
             if (!string.IsNullOrEmpty(dto.PhoneNumber) && dto.PhoneNumber != subscriber.PhoneNumber)
             {
                 if (await PhoneNumberExistsAsync(dto.PhoneNumber, id))
                 {
+                    _logger.LogWarning(
+                        "Subscriber update failed — duplicate phone | Subscriber:{SubscriberId} | Phone:{Phone}",
+                        id, PhoneHelper.Mask(dto.PhoneNumber));
+
                     throw new InvalidOperationException($"رقم الهاتف {dto.PhoneNumber} موجود مسبقاً");
                 }
+
+                changes.Add($"Phone:{PhoneHelper.Mask(subscriber.PhoneNumber)}→{PhoneHelper.Mask(dto.PhoneNumber)}");
+                subscriber.PhoneNumber = dto.PhoneNumber;
             }
 
-            // 3. تحديث الخصائص (فقط المُرسلة)
-            if (!string.IsNullOrEmpty(dto.FullName))
-                subscriber.FullName = dto.FullName;
-
-            if (!string.IsNullOrEmpty(dto.PhoneNumber))
-                subscriber.PhoneNumber = dto.PhoneNumber;
-
+            // Update email
             if (dto.Email != null)
+            {
+                changes.Add($"Email:{EmailHelper.Mask(subscriber.Email)}→{EmailHelper.Mask(dto.Email)}");
                 subscriber.Email = dto.Email;
+            }
 
+            // Update address
             if (dto.Address != null)
+            {
+                changes.Add("Address:updated");
                 subscriber.Address = dto.Address;
+            }
 
+            // Update status
             if (dto.Status.HasValue)
+            {
+                changes.Add($"Status:{subscriber.Status}→{dto.Status.Value}");
                 subscriber.Status = dto.Status.Value;
+            }
 
+            // Update notes
             if (dto.Notes != null)
+            {
+                changes.Add("Notes:updated");
                 subscriber.Notes = dto.Notes;
+            }
 
-            // 4. حفظ التغييرات
             await _unitOfWork.Subscribers.UpdateAsync(subscriber);
             await _unitOfWork.SaveChangesAsync();
+
+            // Subscriber updated successfully
+            _logger.LogInformation(
+                "Subscriber updated successfully | Subscriber:{SubscriberId} | Tenant:{TenantId} | Changes:{Changes}",
+                id, subscriber.TenantId, string.Join(", ", changes));
         }
 
         // ============================================
@@ -197,30 +244,29 @@ namespace ISP.Infrastructure.Services
 
             if (subscriber == null)
             {
+                _logger.LogWarning(
+                    "Subscriber deletion failed — not found | Subscriber:{SubscriberId}",
+                    id);
+
                 throw new InvalidOperationException($"المشترك برقم {id} غير موجود");
             }
 
-            _logger.LogInformation("Soft deleting Subscriber {SubscriberId}", id);
-
-            // ============================================
-            // MANUAL CASCADE: حذف Subscriptions المرتبطة
-            // ============================================
+            // Cascade soft delete subscriptions
             var subscriptions = await _unitOfWork.Subscriptions.GetAllAsync(s => s.SubscriberId == id);
 
             foreach (var subscription in subscriptions)
             {
                 await _unitOfWork.Subscriptions.SoftDeleteAsync(subscription);
-                _logger.LogInformation("Cascade soft deleted Subscription {SubscriptionId}", subscription.Id);
             }
 
-            // ============================================
-            // حذف Subscriber
-            // ============================================
+            // Soft delete subscriber
             await _unitOfWork.Subscribers.SoftDeleteAsync(subscriber);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Subscriber {SubscriberId} soft deleted successfully with {Count} subscriptions",
-                id, subscriptions.Count());
+            // Subscriber soft deleted with cascade
+            _logger.LogWarning(
+                "Subscriber soft deleted | Subscriber:{SubscriberId} | Tenant:{TenantId} | CascadeDeleted:{Count} subscriptions",
+                id, subscriber.TenantId, subscriptions.Count());
         }
 
         // ============================================
@@ -233,18 +279,26 @@ namespace ISP.Infrastructure.Services
         /// </summary>
         public async Task<bool> RestoreAsync(int id)
         {
-            _logger.LogInformation("Attempting to restore Subscriber {SubscriberId}", id);
+            var subscriber = await _unitOfWork.Subscribers.GetByIdIncludingDeletedAsync(id);
+
+            if (subscriber == null || !subscriber.IsDeleted)
+            {
+                _logger.LogWarning(
+                    "Subscriber restore failed — not found or not deleted | Subscriber:{SubscriberId}",
+                    id);
+
+                return false;
+            }
 
             var restored = await _unitOfWork.Subscribers.RestoreByIdAsync(id);
 
             if (restored)
             {
                 await _unitOfWork.SaveChangesAsync();
-                _logger.LogInformation("Subscriber {SubscriberId} restored successfully", id);
-            }
-            else
-            {
-                _logger.LogWarning("Subscriber {SubscriberId} not found or not deleted", id);
+
+                _logger.LogInformation(
+                    "Subscriber restored successfully | Subscriber:{SubscriberId} | Tenant:{TenantId}",
+                    id, subscriber.TenantId);
             }
 
             return restored;
@@ -289,39 +343,41 @@ namespace ISP.Infrastructure.Services
         /// </summary>
         public async Task<bool> PermanentDeleteAsync(int id)
         {
-            _logger.LogWarning("Permanent delete requested for Subscriber {SubscriberId}", id);
-
-            // 1. الحصول على Subscriber (بما فيهم المحذوف)
             var subscriber = await _unitOfWork.Subscribers.GetByIdIncludingDeletedAsync(id);
 
             if (subscriber == null)
             {
-                _logger.LogWarning("Subscriber {SubscriberId} not found for permanent delete", id);
+                _logger.LogWarning(
+                    "Subscriber permanent delete failed — not found | Subscriber:{SubscriberId}",
+                    id);
+
                 return false;
             }
 
-            // 2. التحقق من أنه محذوف (Soft Deleted)
             if (!subscriber.IsDeleted)
             {
+                _logger.LogWarning(
+                    "Subscriber permanent delete blocked — not soft deleted | Subscriber:{SubscriberId}",
+                    id);
+
                 throw new InvalidOperationException("لا يمكن الحذف النهائي لمشترك نشط. استخدم Soft Delete أولاً");
             }
 
-            // 3. حذف Subscriptions المرتبطة نهائياً
+            // Permanently delete related subscriptions
             var subscriptions = await _unitOfWork.Subscriptions.GetAllIncludingDeletedAsync();
-            var subscriberSubs = subscriptions.Where(s => s.SubscriberId == id);
+            var subscriberSubs = subscriptions.Where(s => s.SubscriberId == id).ToList();
 
             foreach (var subscription in subscriberSubs)
-            {
                 await _unitOfWork.Subscriptions.DeleteAsync(subscription);
-                _logger.LogInformation("Permanently deleted Subscription {SubscriptionId}", subscription.Id);
-            }
 
-            // 4. حذف Subscriber نهائياً
+            // Permanently delete subscriber
             await _unitOfWork.Subscribers.DeleteAsync(subscriber);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogWarning("Subscriber {SubscriberId} permanently deleted with {Count} subscriptions",
-                id, subscriberSubs.Count());
+            // Critical — cannot be undone
+            _logger.LogCritical(
+                "Subscriber PERMANENTLY DELETED | Subscriber:{SubscriberId} | Tenant:{TenantId} | DeletedSubscriptions:{Count}",
+                id, subscriber.TenantId, subscriberSubs.Count);
 
             return true;
         }

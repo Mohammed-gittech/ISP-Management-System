@@ -1,17 +1,12 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-
 namespace ISP.Application.Helpers
 {
     public static class EmailHelper
     {
-        public static string Mask(string email)
+        public static string Mask(string? email)
         {
             // Guard clause — if email is empty return as is
             if (string.IsNullOrWhiteSpace(email))
-                return email;
+                return string.Empty;
 
             // Split email into name and domain
             // ahmed@gmail.com → ["ahmed", "gmail.com"]

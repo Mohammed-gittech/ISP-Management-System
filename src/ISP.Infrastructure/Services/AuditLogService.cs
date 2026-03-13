@@ -52,7 +52,7 @@ namespace ISP.Infrastructure.Services
 
                 var auditLog = new AuditLog
                 {
-                    TenantId = _currentTenantService.TenantId,
+                    TenantId = TryGetTenantId(),
                     UserId = _currentTenantService.UserId,
                     Username = _currentTenantService.Username ?? "Anonymous",
 
@@ -63,8 +63,8 @@ namespace ISP.Infrastructure.Services
                     OldValues = FormatJsonValue(oldValues),
                     NewValues = FormatJsonValue(newValues),
 
-                    IpAddress = httpContext?.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
-                    UserAgent = httpContext?.Request.Headers["User-Agent"].ToString(),
+                    IpAddress = MaskIpAddress(httpContext?.Connection.RemoteIpAddress?.ToString()),
+                    UserAgent = ParseUserAgent(httpContext?.Request.Headers["User-Agent"].ToString()),
 
                     Timestamp = DateTime.UtcNow,
                     Success = success,
@@ -90,6 +90,71 @@ namespace ISP.Infrastructure.Services
 
             // إذا كان Object، نحوله لـ JSON
             return System.Text.Json.JsonSerializer.Serialize(value);
+        }
+
+        // Mask IP address — keep first 3 parts only
+        // 192.168.1.100 → 192.168.1.*
+        private string MaskIpAddress(string? ipAddress)
+        {
+            if (string.IsNullOrWhiteSpace(ipAddress))
+                return "Unknown";
+
+            // IPv4: 192.168.1.100
+            if (ipAddress.Contains('.'))
+            {
+                var parts = ipAddress.Split('.');
+                if (parts.Length == 4)
+                    return $"{parts[0]}.{parts[1]}.{parts[2]}.*";
+            }
+
+            // IPv6: 2001:db8::1
+            if (ipAddress.Contains(':'))
+            {
+                var parts = ipAddress.Split(':');
+                if (parts.Length >= 3)
+                    return $"{parts[0]}:{parts[1]}:*";
+            }
+
+            return "Unknown";
+        }
+
+        // Extract only browser and OS type — discard device details
+        // "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0.0.0" → "Chrome/Windows"
+        private string? ParseUserAgent(string? userAgent)
+        {
+            if (string.IsNullOrWhiteSpace(userAgent))
+                return null;
+
+            // Detect browser
+            var browser = "Unknown";
+            if (userAgent.Contains("Chrome")) browser = "Chrome";
+            else if (userAgent.Contains("Firefox")) browser = "Firefox";
+            else if (userAgent.Contains("Safari")) browser = "Safari";
+            else if (userAgent.Contains("Edge")) browser = "Edge";
+            else if (userAgent.Contains("Postman")) browser = "Postman";
+
+            // Detect OS
+            var os = "Unknown";
+            if (userAgent.Contains("Windows")) os = "Windows";
+            else if (userAgent.Contains("Mac")) os = "Mac";
+            else if (userAgent.Contains("Linux")) os = "Linux";
+            else if (userAgent.Contains("Android")) os = "Android";
+            else if (userAgent.Contains("iPhone")) os = "iOS";
+
+            return $"{browser}/{os}";
+        }
+
+        // Safe TenantId access — returns null if context not set (e.g. during Login)
+        private int? TryGetTenantId()
+        {
+            try
+            {
+                return _currentTenantService.TenantId;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         // ============================================
@@ -298,5 +363,7 @@ namespace ISP.Infrastructure.Services
 
             return count;
         }
+
+
     }
 }
