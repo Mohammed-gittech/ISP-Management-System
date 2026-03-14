@@ -126,6 +126,14 @@ ISP.Tests          ← xUnit Unit Tests
 - Scheduled expiry notification sending
 - Maintenance jobs via `MaintenanceController`
 
+### 🔒 Security Alerts & Monitoring
+
+- Automated threat detection via Hangfire job (every minute)
+- Detects: Brute Force, Suspicious IP Logins, Unauthorized Access, High IP Activity
+- Real-time Telegram notifications to SuperAdmin
+- Alert management: Review, Resolve, Ignore
+- Manual scan trigger via API
+
 ---
 
 ## 🛠 Tech Stack
@@ -144,6 +152,7 @@ ISP.Tests          ← xUnit Unit Tests
 | QR Code         | QRCoder                                |
 | Testing         | xUnit                                  |
 | Architecture    | Clean Architecture                     |
+| Notifications   | Telegram Bot API                       |
 
 ---
 
@@ -164,6 +173,7 @@ src/
 │   │   ├── ReportsController.cs
 │   │   ├── AuditLogsController.cs
 │   │   ├── MaintenanceController.cs
+│   │   ├── SecurityAlertsController.cs
 │   │   └── TelegramTestController.cs
 │   ├── Middleware/
 │   │   ├── AuditLoggingMiddleware.cs
@@ -196,6 +206,8 @@ src/
 │       ├── InvoiceService.cs
 │       ├── NotificationService.cs
 │       ├── ReportService.cs
+│       ├── SecurityAlertService.cs
+│       ├── TelegramAlertSender.cs
 │       └── AuditLogService.cs
 │
 └── ISP.Tests/
@@ -362,20 +374,31 @@ Hangfire dashboard: `https://localhost:5001/hangfire`
 | GET    | `/api/auditlogs`            | Get audit logs (filterable) |
 | GET    | `/api/auditlogs/statistics` | Audit statistics            |
 
+### Security Alerts _(SuperAdmin only)_
+
+| Method | Endpoint                            | Description         |
+| ------ | ----------------------------------- | ------------------- |
+| GET    | `/api/security-alerts`              | Get all alerts      |
+| POST   | `/api/security-alerts/{id}/review`  | Mark as reviewed    |
+| POST   | `/api/security-alerts/{id}/resolve` | Mark as resolved    |
+| POST   | `/api/security-alerts/{id}/ignore`  | Mark as ignored     |
+| POST   | `/api/security-alerts/scan`         | Trigger manual scan |
+
 ---
 
 ## 🔒 Security
 
-| Feature            | Details                                               |
-| ------------------ | ----------------------------------------------------- |
-| JWT Authentication | Access token + Refresh token rotation                 |
-| Role Authorization | SuperAdmin, TenantAdmin, Employee                     |
-| Account Lockout    | Configurable max attempts + lockout duration          |
-| Password Policy    | Complexity rules enforced via FluentValidation        |
-| Rate Limiting      | Sliding window on auth endpoints, fixed window global |
-| CORS               | Configurable per environment                          |
-| Audit Logging      | All mutations logged with masked sensitive data       |
-| Token Revocation   | On password change and account deletion               |
+| Feature             | Details                                                   |
+| ------------------- | --------------------------------------------------------- |
+| JWT Authentication  | Access token + Refresh token rotation                     |
+| Role Authorization  | SuperAdmin, TenantAdmin, Employee                         |
+| Account Lockout     | Configurable max attempts + lockout duration              |
+| Password Policy     | Complexity rules enforced via FluentValidation            |
+| Rate Limiting       | Sliding window on auth endpoints, fixed window global     |
+| CORS                | Configurable per environment                              |
+| Audit Logging       | All mutations logged with masked sensitive data           |
+| Token Revocation    | On password change and account deletion                   |
+| Security Monitoring | Automated threat detection with real-time Telegram alerts |
 
 ---
 
