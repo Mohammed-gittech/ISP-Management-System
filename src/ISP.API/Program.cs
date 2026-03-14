@@ -3,12 +3,15 @@ using System.Threading.RateLimiting;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Hangfire;
+using Hangfire.Common;
 using Hangfire.SqlServer;
 using ISP.API.Extensions;
 using ISP.API.Middleware;
 using ISP.Application.Interfaces;
 using ISP.Application.Mappings;
 using ISP.Application.Validators;
+using ISP.Domain.Entities;
+using ISP.Domain.Enums;
 using ISP.Domain.Interfaces;
 using ISP.Infrastructure;
 using ISP.Infrastructure.BackgroundJobs;
@@ -48,9 +51,7 @@ try
     builder.Configuration.ValidateRequiredSettings();
 
     // Add services to the container.
-    // ============================================
     // Database
-    // ============================================
     builder.Services.AddDbContext<ApplicationDbContext>(options =>
         options.UseSqlServer(
             builder.Configuration.GetConnectionString("DefaultConnection"),
@@ -58,9 +59,7 @@ try
         )
     );
 
-    // ============================================
     // Hangfire Configuration
-    // ============================================
     builder.Services.AddHangfire(config =>
     {
         config
@@ -82,9 +81,7 @@ try
     // Add Hangfire Server
     builder.Services.AddHangfireServer();
 
-    // ============================================
     // Authentication & JWT
-    // ============================================
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
         {
@@ -103,15 +100,10 @@ try
         });
     builder.Services.AddAuthorization();
 
-    // ============================================
     // CORS Policy
-    // ============================================
-
     builder.Services.AddCors(options =>
     {
-        // ============================
-        // السياسة الأولى — DevelopmentPolicy
-        // ============================
+        // DevelopmentPolicy
         options.AddPolicy("DevelopmentPolicy", policy =>
         {
             policy
@@ -121,9 +113,7 @@ try
             .AllowCredentials(); // AllowCredentials = اسمح بإرسال Authorization Headers
         });
 
-        // ============================
-        // السياسة الثانية — ProductionPolicy
-        // ============================
+        // ProductionPolicy
         options.AddPolicy("ProductionPolicy", policy =>
         {
             var allowedOrigins = builder.Configuration
@@ -138,10 +128,7 @@ try
         });
     });
 
-
-    // ============================================
-    // Rate Limiting ← جديد
-    // ============================================
+    // Rate Limiting 
     builder.Services.AddRateLimiter(options =>
     {
         // AuthPolicy
@@ -191,16 +178,10 @@ try
         };
     });
 
-
-    // ============================================
     // AutoMapper
-    // ============================================
     builder.Services.AddAutoMapper(typeof(AutoMapperProfile).Assembly);
 
-    // ============================================
     // FluentValidation
-    // ============================================
-
     builder.Services.AddFluentValidationAutoValidation();
     builder.Services.AddValidatorsFromAssemblyContaining<CreateTenantValidator>();
     builder.Services.AddValidatorsFromAssemblyContaining<CreateSubscriberValidator>();
@@ -215,21 +196,15 @@ try
     builder.Services.AddValidatorsFromAssemblyContaining<RenewTenantSubscriptionValidator>();
     builder.Services.AddValidatorsFromAssemblyContaining<ConfirmTenantPaymentValidator>();
 
-    // ============================================
     // Repository & Unit of Work
-    // ============================================
     builder.Services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
     builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
-    // ============================================
     // Identity Services
-    // ============================================
     builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
     builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
 
-    // ============================================
     // Business Services
-    // ============================================
     builder.Services.AddScoped<ICurrentTenantService, CurrentTenantService>();
     builder.Services.AddScoped<ITenantService, TenantService>();
     builder.Services.AddScoped<IAuthService, AuthService>();
@@ -237,53 +212,43 @@ try
     builder.Services.AddScoped<IPlanService, PlanService>();
     builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 
-    // ============================================
-    // Phase 2: Telegram & Notification Services
-    // ============================================
+    // Telegram & Notification Services
     builder.Services.AddScoped<ITelegramService, TelegramService>();
     builder.Services.AddScoped<INotificationService, NotificationService>();
 
-    // ============================================
-    // Phase 2: Background Jobs
-    // ============================================
+    // Background Jobs
     builder.Services.AddScoped<NotificationJob>();
     builder.Services.AddScoped<SubscriptionStatusJob>();
     builder.Services.AddScoped<RetentionCleanupJob>();
 
-    // ============================================
-    // Phase 3: Users Management Service
-    // ============================================
+    // Users Management Service
     builder.Services.AddScoped<IUserService, UserService>();
 
-    // ============================================
-    // Phase 3: Validators
-    // ============================================
-
-
-    // ============================================
-    // Phase 3: Audit Log Service
-    // ============================================
+    // Audit Log Service
     builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 
-    // ============================================
     // Payment System Services
-    // ============================================
     builder.Services.AddScoped<IPaymentService, PaymentService>();
     builder.Services.AddScoped<IInvoiceService, InvoiceService>();
 
-    // ============================================
     // Reports & Analytics Service
-    // ============================================
     builder.Services.AddScoped<IReportService, ReportService>();
 
+    // Security Alerts 
+    builder.Services.AddHttpClient<ITelegramAlertSender, TelegramAlertSender>();
+
+    // Security Alerts
+    builder.Services.AddScoped<ISecurityAlertService, SecurityAlertService>();
+    builder.Services.AddScoped<SecurityMonitoringJob>();
+
     // ============================================
-    // HttpContextAccessor (مطلوب للـ IP Address)
-    // ============================================
+    // HttpContextAccessor (IP Address)
     builder.Services.AddHttpContextAccessor();
 
     builder.Services.AddControllers();
 
     builder.Services.AddEndpointsApiExplorer();
+
     // Register Swagger generator and customize its behavior.
     builder.Services.AddSwaggerGen(options =>
     {
@@ -321,10 +286,8 @@ try
         });
 
 
-        // ===============================
         // 2) Require the Bearer scheme for secured endpoints
-        // ===============================
-        //
+
         // This tells Swagger that endpoints protected by [Authorize]
         // require the Bearer token defined above.
         options.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -350,6 +313,50 @@ try
 
     var app = builder.Build();
 
+    // ============================================
+    // Generate SuperAdmin Password Hash (Dev Only)
+    // ============================================
+
+    // ============================================
+    // Seed SuperAdmin — runs once if not exists
+    // ============================================
+
+    if (app.Environment.IsDevelopment())
+    {
+        using (var scope = app.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider
+                .GetRequiredService<ApplicationDbContext>();
+
+            var passwordHasher = scope.ServiceProvider
+                .GetRequiredService<IPasswordHasher>();
+
+            // Read password inside Development block only
+            var password = builder.Configuration["SuperAdmin:Password"]
+                ?? throw new InvalidOperationException(
+                    "SuperAdmin:Password is not configured");
+
+            // Create SuperAdmin only if not exists
+            if (!context.Users.Any(u => u.Role == UserRole.SuperAdmin))
+            {
+                context.Users.Add(new User
+                {
+                    TenantId = null,
+                    Username = "superadmin",
+                    Email = "superadmin@isp.com",
+                    PasswordHash = passwordHasher.HashPassword(password),
+                    Role = UserRole.SuperAdmin,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                });
+
+                await context.SaveChangesAsync();
+
+                Log.Information("SuperAdmin created successfully");
+            }
+        }
+    }
+
     // Log every HTTP request automatically
     app.UseSerilogRequestLogging(options =>
     {
@@ -364,9 +371,7 @@ try
         builder.Configuration.LogConfigurationSummary(logger);
     }
 
-    // ============================================
     // Middleware Pipeline
-    // ============================================
 
     // 1. Exception Handling
     app.UseExceptionHandling();
@@ -401,9 +406,7 @@ try
 
     app.UseAuthorization();
 
-    // ============================================
     // Hangfire Dashboard
-    // ============================================
     app.UseHangfireDashboard("/hangfire", new DashboardOptions
     {
         // ⚠️ للتطوير فقط - في Production استخدم Authorization
@@ -427,9 +430,7 @@ finally
     Log.CloseAndFlush();
 }
 
-// ============================================
 // Background Jobs Configuration
-// ============================================
 void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
 {
     using var scope = serviceProvider.CreateScope();
@@ -505,6 +506,17 @@ void ConfigureBackgroundJobs(IServiceProvider serviceProvider)
             TimeZone = TimeZoneInfo.Utc
         }
     );
+
+    // Job 7: Security Monitoring (Every minute)
+    var securityMonitoringCron = config["BackgroundJobs:SecurityMonitoringCron"] ?? "* * * * *";
+    RecurringJob.AddOrUpdate<SecurityMonitoringJob>(
+        "security-monitoring",
+        job => job.RunSecurityScanAsync(),
+        securityMonitoringCron, // ← Cron: كل دقيقة
+        new RecurringJobOptions
+        {
+            TimeZone = TimeZoneInfo.Utc
+        });
 
     //جدولة Retention Cleanup Job
     RecurringJob.AddOrUpdate<RetentionCleanupJob>(

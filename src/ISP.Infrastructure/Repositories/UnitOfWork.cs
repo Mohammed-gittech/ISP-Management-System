@@ -38,6 +38,8 @@ namespace ISP.Infrastructure.Repositories
         // Refresh Token
         private IRepository<RefreshToken>? _refreshTokens;
 
+        private IRepository<SecurityAlert>? _securityAlerts;
+
         public UnitOfWork(
             ApplicationDbContext context,
             ICurrentTenantService currentTenantService)
@@ -91,6 +93,9 @@ namespace ISP.Infrastructure.Repositories
         // Refresh Token
         public IRepository<RefreshToken> RefreshTokens =>
             _refreshTokens ??= new GenericRepository<RefreshToken>(_context, _currentTenantService);
+
+        public IRepository<SecurityAlert> SecurityAlerts =>
+            _securityAlerts ??= new GenericRepository<SecurityAlert>(_context, _currentTenantService);
 
         // ============================================
         // Transaction Methods 

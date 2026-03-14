@@ -45,6 +45,8 @@ namespace ISP.Infrastructure.Data
         // Refresh Token
         public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+        public DbSet<SecurityAlert> SecurityAlerts { get; set; }
+
         // ============================================
         // OnModelCreating - تكوين Model
         // ============================================

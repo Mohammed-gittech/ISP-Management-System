@@ -28,6 +28,8 @@ namespace ISP.Domain.Interfaces
         // RefreshTokens
         IRepository<RefreshToken> RefreshTokens { get; }
 
+        IRepository<SecurityAlert> SecurityAlerts { get; }
+
         // ============================================
         // Transaction Methods 
         // ============================================
