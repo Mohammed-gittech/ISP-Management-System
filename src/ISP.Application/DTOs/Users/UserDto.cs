@@ -1,9 +1,11 @@
 // ============================================
 // UserDto.cs - عرض بيانات المستخدم
 // ============================================
+using ISP.Domain.Interfaces;
+
 namespace ISP.Application.DTOs.Users
 {
-    public class UserDto
+    public class UserDto : ITenantOwnedResource
     {
         public int Id { get; set; }
         public int? TenantId { get; set; }

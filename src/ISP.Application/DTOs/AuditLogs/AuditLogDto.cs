@@ -1,6 +1,8 @@
+using ISP.Domain.Interfaces;
+
 namespace ISP.Application.DTOs.AuditLogs
 {
-    public class AuditLogDto
+    public class AuditLogDto : ITenantOwnedResource
     {
         public int Id { get; set; }
         public int? TenantId { get; set; }

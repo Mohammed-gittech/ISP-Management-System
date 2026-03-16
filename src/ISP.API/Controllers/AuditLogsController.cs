@@ -1,7 +1,6 @@
 // ============================================
 // AuditLogsController.cs - إدارة سجلات العمليات
 // ============================================
-using System.Security.Claims;
 using ISP.Application.DTOs.AuditLogs;
 using ISP.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -11,12 +10,15 @@ namespace ISP.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // يجب تسجيل الدخول
-    public class AuditLogsController : ControllerBase
+    [Authorize]
+    public class AuditLogsController : BaseController
     {
         private readonly IAuditLogService _auditLogService;
 
-        public AuditLogsController(IAuditLogService auditLogService)
+        public AuditLogsController(
+            IAuditLogService auditLogService,
+            IAuthorizationService authorizationService)
+            : base(authorizationService)
         {
             _auditLogService = auditLogService;
         }
@@ -26,6 +28,7 @@ namespace ISP.API.Controllers
         // ============================================
         [HttpGet]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAll([FromQuery] AuditLogFilterDto filter)
         {
             var result = await _auditLogService.GetAllAsync(filter);
@@ -37,6 +40,9 @@ namespace ISP.API.Controllers
         // ============================================
         [HttpGet("{id}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetById(int id)
         {
             var log = await _auditLogService.GetByIdAsync(id);
@@ -44,13 +50,8 @@ namespace ISP.API.Controllers
                 return NotFound(new { success = false, message = "السجل غير موجود" });
 
             // TenantAdmin يرى سجلات وكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (log.TenantId != currentTenantId)
-                    return Forbid();
-            }
+            var forbid = await CheckOwnershipAsync(log);
+            if (forbid != null) return forbid;
 
             return Ok(new { success = true, data = log });
         }
@@ -60,19 +61,16 @@ namespace ISP.API.Controllers
         // ============================================
         [HttpGet("tenant/{tenantId}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetByTenant(
             int tenantId,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
             // TenantAdmin يرى وكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (tenantId != currentTenantId)
-                    return Forbid();
-            }
+            if (IsCrossTenantAccess(tenantId))
+                return Forbid();
 
             var result = await _auditLogService.GetByTenantAsync(tenantId, page, pageSize);
             return Ok(new { success = true, data = result });
@@ -83,6 +81,7 @@ namespace ISP.API.Controllers
         // ============================================
         [HttpGet("user/{userId}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetByUser(
             int userId,
             [FromQuery] int page = 1,
@@ -97,6 +96,7 @@ namespace ISP.API.Controllers
         // ============================================
         [HttpGet("entity/{entityType}/{entityId}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetByEntity(
             string entityType,
             int entityId,
@@ -112,15 +112,12 @@ namespace ISP.API.Controllers
         // ============================================
         [HttpPost("search")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> Search([FromBody] AuditLogFilterDto filter)
         {
             // TenantAdmin يبحث في سجلات وكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                filter.TenantId = currentTenantId;
-            }
+            if (!IsSuperAdmin())
+                filter.TenantId = GetCurrentTenantId();
 
             var result = await _auditLogService.GetAllAsync(filter);
             return Ok(new { success = true, data = result });
@@ -130,11 +127,13 @@ namespace ISP.API.Controllers
         // 7. GET MY LOGS (Current User)
         // ============================================
         [HttpGet("my-logs")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetMyLogs(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
-            var currentUserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+            var currentUserId = GetCurrentUserId();
+
             var result = await _auditLogService.GetByUserAsync(currentUserId, page, pageSize);
             return Ok(new { success = true, data = result });
         }
@@ -144,6 +143,8 @@ namespace ISP.API.Controllers
         // ============================================
         [HttpDelete("cleanup/{olderThanDays}")]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> CleanupOldLogs(int olderThanDays)
         {
             if (olderThanDays < 30)

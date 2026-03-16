@@ -1,6 +1,8 @@
 // ============================================
 // AuditLog.cs - سجل العمليات
 // ============================================
+using ISP.Domain.Interfaces;
+
 namespace ISP.Domain.Entities
 {
     /// <summary>
@@ -8,7 +10,7 @@ namespace ISP.Domain.Entities
     /// لأن سجلات الـ Audit يجب أن لا تخضع للـ Soft Delete أبداً
     /// هي سجل قانوني لا يُحذف بشكل خفي
     /// </summary>
-    public class AuditLog
+    public class AuditLog : ITenantOwnedResource
     {
         public int Id { get; set; }
 

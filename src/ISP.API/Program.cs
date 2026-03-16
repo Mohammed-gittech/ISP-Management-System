@@ -3,10 +3,10 @@ using System.Threading.RateLimiting;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Hangfire;
-using Hangfire.Common;
 using Hangfire.SqlServer;
 using ISP.API.Extensions;
 using ISP.API.Middleware;
+using ISP.Application.Authorization;
 using ISP.Application.Interfaces;
 using ISP.Application.Mappings;
 using ISP.Application.Validators;
@@ -22,6 +22,7 @@ using ISP.Infrastructure.Services;
 using ISP.Infrastructure.Services.Notifications;
 using ISP.Infrastructure.Services.Telegram;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -98,7 +99,18 @@ try
                 ClockSkew = TimeSpan.Zero
             };
         });
-    builder.Services.AddAuthorization();
+
+    // Authorization & Policies
+    builder.Services.AddAuthorization(options =>
+    {
+        // Policy for tenant ownership verification
+        // Used with Resource-Based Authorization in controllers
+        options.AddPolicy("TenantOwnership", policy =>
+            policy.AddRequirements(new TenantOwnershipRequirement()));
+    });
+
+    // Register handler — Scoped because it reads per-request JWT claims
+    builder.Services.AddScoped<IAuthorizationHandler, TenantOwnershipHandler>();
 
     // CORS Policy
     builder.Services.AddCors(options =>

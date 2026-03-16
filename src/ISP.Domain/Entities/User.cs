@@ -3,10 +3,11 @@
 // ============================================
 
 using ISP.Domain.Enums;
+using ISP.Domain.Interfaces;
 
 namespace ISP.Domain.Entities
 {
-    public class User : BaseEntity
+    public class User : BaseEntity, ITenantOwnedResource
     {
         public int? TenantId { get; set; } // null = SuperAdmin
         public Tenant? Tenant { get; set; }

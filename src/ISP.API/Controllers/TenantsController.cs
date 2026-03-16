@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using ISP.Application.DTOs.Tenants;
 using ISP.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -8,14 +7,18 @@ namespace ISP.API.Controllers
 {
     /// <summary>
     /// Controller لإدارة الوكلاء
+    /// ✅ Resource-Based Authorization via BaseController
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    public class TenantsController : ControllerBase
+    public class TenantsController : BaseController
     {
         private readonly ITenantService _service;
 
-        public TenantsController(ITenantService service)
+        public TenantsController(
+            ITenantService service,
+            IAuthorizationService authorizationService)
+            : base(authorizationService)
         {
             _service = service;
         }
@@ -26,6 +29,8 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("register")]
         [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Register([FromBody] CreateTenantDto dto)
         {
             var result = await _service.CreateAsync(dto);
@@ -46,6 +51,9 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetAll([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
         {
             var result = await _service.GetAllAsync(page, pageSize);
@@ -62,16 +70,15 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet("{id}")]
         [Authorize]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetById(int id)
         {
-            // ✅ Ownership Check: TenantAdmin يرى وكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (id != currentTenantId)
-                    return Forbid();
-            }
+            // TenantAdmin يرى وكيله فقط
+            if (IsCrossTenantAccess(id))
+                return Forbid();
 
             var result = await _service.GetByIdAsync(id);
 
@@ -96,23 +103,27 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPut("{id}")]
         [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateTenantDto dto)
         {
-            // ✅ Ownership Check: TenantAdmin يعدل وكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (id != currentTenantId)
-                    return Forbid();
-            }
-            await _service.UpdateAsync(id, dto);
+            // TenantAdmin يعدل وكيله فقط
+            if (IsCrossTenantAccess(id))
+                return Forbid();
 
-            return Ok(new
+            try
             {
-                success = true,
-                message = "تم تحديث البيانات بنجاح"
-            });
+                await _service.UpdateAsync(id, dto);
+
+                return Ok(new { success = true, message = "تم تحديث البيانات بنجاح" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { success = false, message = ex.Message });
+            }
         }
 
         /// <summary>
@@ -120,6 +131,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("{id}/deactivate")]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Deactivate(int id)
         {
             var result = await _service.DeactivateAsync(id);
@@ -145,6 +160,10 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("{id}/activate")]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Activate(int id)
         {
             var result = await _service.ActivateAsync(id);
@@ -170,28 +189,22 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet("{id}/subscribers-count")]
         [Authorize]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetSubscribersCount(int id)
         {
-            // ✅ Ownership Check
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (id != currentTenantId)
-                    return Forbid();
-            }
+            // TenantAdmin يرى وكيله فقط
+            if (IsCrossTenantAccess(id))
+                return Forbid();
 
-            var count = await _service.GetCurrentSubscribersCountAsync(id);
             var tenant = await _service.GetByIdAsync(id);
 
             if (tenant == null)
-            {
-                return NotFound(new
-                {
-                    success = false,
-                    message = "الوكيل غير موجود"
-                });
-            }
+                return NotFound(new { success = false, message = "الوكيل غير موجود" });
+
+            var count = await _service.GetCurrentSubscribersCountAsync(id);
 
             return Ok(new
             {
@@ -214,21 +227,31 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("{id}/renew-request")]
         [Authorize(Roles = "TenantAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> RenewRequest(int id, [FromBody] RenewTenantSubscriptionDto dto)
         {
-            // Ownership Check: TenantAdmin يجدد اشتراكه فقط
-            var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-            if (id != currentTenantId)
+            // TenantAdmin يجدد اشتراكه فقط
+            if (IsCrossTenantAccess(id))
                 return Forbid();
 
-            var result = await _service.RenewRequestAsync(id, dto);
-
-            return Ok(new
+            try
             {
-                success = true,
-                message = "تم إرسال طلب التجديد بنجاح — سيتم التواصل معك بعد تأكيد الدفع",
-                data = result
-            });
+                var result = await _service.RenewRequestAsync(id, dto);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "تم إرسال طلب التجديد بنجاح — سيتم التواصل معك بعد تأكيد الدفع",
+                    data = result
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
         }
 
         /// <summary>
@@ -236,15 +259,23 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpPost("{id}/confirm-payment")]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> ConfirmPayment(int id, [FromBody] ConfirmTenantPaymentDto dto)
         {
-            await _service.ConfirmPaymentAsync(id, dto);
-
-            return Ok(new
+            try
             {
-                success = true,
-                message = "تم تأكيد الدفع وتفعيل الحساب بنجاح"
-            });
+                await _service.ConfirmPaymentAsync(id, dto);
+
+                return Ok(new { success = true, message = "تم تأكيد الدفع وتفعيل الحساب بنجاح" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
         }
 
         /// <summary>
@@ -253,6 +284,9 @@ namespace ISP.API.Controllers
         /// </summary>
         [HttpGet("pending-renewals")]
         [Authorize(Roles = "SuperAdmin")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetPendingRenewals()
         {
             var result = await _service.GetPendingRenewalsAsync();

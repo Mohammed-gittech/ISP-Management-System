@@ -1,25 +1,28 @@
-using System.Security.Claims;
 using ISP.Application.DTOs.Users;
 using ISP.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+
 
 namespace ISP.API.Controllers
 {
     /// <summary>
     /// Controller لإدارة المستخدمين
     /// ✅ Soft Delete Support
-    /// ✅ Extra Security Checks
+    /// ✅ Resource-Based Authorization via BaseController
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public class UsersController : ControllerBase
+    public class UsersController : BaseController
     {
         private readonly IUserService _userService;
 
-        public UsersController(IUserService userService)
+        public UsersController(
+            IUserService userService,
+            IAuthorizationService authorizationService)
+            : base(authorizationService)
         {
             _userService = userService;
         }
@@ -59,14 +62,9 @@ namespace ISP.API.Controllers
             if (user == null)
                 return NotFound(new { success = false, message = "المستخدم غير موجود" });
 
-            // TenantAdmin يرى مستخدمي وكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (user.TenantId != currentTenantId)
-                    return Forbid();
-            }
+            // Verify TenantAdmin can only access users within their tenant
+            var forbid = await CheckOwnershipAsync(user);
+            if (forbid != null) return forbid;
 
             return Ok(new { success = true, data = user });
         }
@@ -83,14 +81,9 @@ namespace ISP.API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
-            // TenantAdmin يرى وكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (tenantId != currentTenantId)
-                    return Forbid();
-            }
+            // TenantAdmin can only access their own tenant's users
+            if (IsCrossTenantAccess(tenantId))
+                return Forbid();
 
             var result = await _userService.GetUsersByTenantAsync(tenantId, page, pageSize);
             return Ok(new { success = true, data = result });
@@ -108,15 +101,13 @@ namespace ISP.API.Controllers
         {
             try
             {
-                // TenantAdmin يُنشئ مستخدمين لوكيله فقط
-                var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-                if (currentUserRole == "TenantAdmin")
+                // TenantAdmin can only create users within their tenant
+                // and cannot assign SuperAdmin role
+                if (!IsSuperAdmin())
                 {
-                    var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                    if (dto.TenantId != currentTenantId)
+                    if (IsCrossTenantAccess(dto.TenantId ?? 0))
                         return Forbid();
 
-                    // TenantAdmin لا يمكنه إنشاء SuperAdmin
                     if (dto.Role == "SuperAdmin")
                         return Forbid();
                 }
@@ -150,14 +141,9 @@ namespace ISP.API.Controllers
                 if (user == null)
                     return NotFound(new { success = false, message = "المستخدم غير موجود" });
 
-                // TenantAdmin يعدل مستخدمي وكيله فقط
-                var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-                if (currentUserRole == "TenantAdmin")
-                {
-                    var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                    if (user.TenantId != currentTenantId)
-                        return Forbid();
-                }
+                // Verify TenantAdmin can only update users within their tenant
+                var forbid = await CheckOwnershipAsync(user);
+                if (forbid != null) return forbid;
 
                 var updated = await _userService.UpdateAsync(id, dto);
                 return Ok(new { success = true, message = "تم تحديث المستخدم بنجاح", data = updated });
@@ -188,17 +174,13 @@ namespace ISP.API.Controllers
                     return NotFound(new { success = false, message = "المستخدم غير موجود" });
 
                 // TenantAdmin يحذف مستخدمي وكيله فقط
-                var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-                if (currentUserRole == "TenantAdmin")
-                {
-                    var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                    if (user.TenantId != currentTenantId)
-                        return Forbid();
+                // Verify TenantAdmin can only delete users within their tenant
+                var forbid = await CheckOwnershipAsync(user);
+                if (forbid != null) return forbid;
 
-                    // TenantAdmin لا يمكنه حذف SuperAdmin
-                    if (user.Role == "SuperAdmin")
-                        return Forbid();
-                }
+                // TenantAdmin cannot delete SuperAdmin users
+                if (!IsSuperAdmin() && user.Role == "SuperAdmin")
+                    return Forbid();
 
                 var deleted = await _userService.DeleteAsync(id);
 
@@ -341,7 +323,10 @@ namespace ISP.API.Controllers
         {
             try
             {
-                var currentUserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                var currentUserId = GetCurrentUserId();
+                if (currentUserId == 0)
+                    return Unauthorized();
+
                 var result = await _userService.ChangePasswordAsync(currentUserId, dto);
 
                 if (!result)
@@ -370,14 +355,9 @@ namespace ISP.API.Controllers
             if (user == null)
                 return NotFound(new { success = false, message = "المستخدم غير موجود" });
 
-            // TenantAdmin يعيد تعيين كلمات المرور لوكيله فقط
-            var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            if (currentUserRole == "TenantAdmin")
-            {
-                var currentTenantId = int.Parse(User.FindFirst("TenantId")?.Value ?? "0");
-                if (user.TenantId != currentTenantId)
-                    return Forbid();
-            }
+            // Verify TenantAdmin can only reset passwords within their tenant
+            var forbid = await CheckOwnershipAsync(user);
+            if (forbid != null) return forbid;
 
             var result = await _userService.ResetPasswordAsync(id, dto);
 
