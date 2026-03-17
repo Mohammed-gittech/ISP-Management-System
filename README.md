@@ -51,6 +51,7 @@ ISP.Tests          ← xUnit Unit Tests
 - **Generic Repository + Unit of Work** — consistent data access
 - **Multi-Tenancy** — every entity carries a `TenantId`
 - **Soft Delete** — data is never permanently lost unless explicitly requested
+- **Resource-Based Authorization** — tenant ownership enforced at controller level
 
 ---
 
@@ -70,6 +71,8 @@ ISP.Tests          ← xUnit Unit Tests
 - Account lockout after failed login attempts
 - Password policy (minimum length, complexity, bcrypt with max 128 chars)
 - Refresh token revocation on password change and account deletion
+- Resource-Based Authorization for tenant data isolation
+- BaseController with shared ownership helper methods
 
 ### 👤 Subscriber Management
 
@@ -388,17 +391,18 @@ Hangfire dashboard: `https://localhost:5001/hangfire`
 
 ## 🔒 Security
 
-| Feature             | Details                                                   |
-| ------------------- | --------------------------------------------------------- |
-| JWT Authentication  | Access token + Refresh token rotation                     |
-| Role Authorization  | SuperAdmin, TenantAdmin, Employee                         |
-| Account Lockout     | Configurable max attempts + lockout duration              |
-| Password Policy     | Complexity rules enforced via FluentValidation            |
-| Rate Limiting       | Sliding window on auth endpoints, fixed window global     |
-| CORS                | Configurable per environment                              |
-| Audit Logging       | All mutations logged with masked sensitive data           |
-| Token Revocation    | On password change and account deletion                   |
-| Security Monitoring | Automated threat detection with real-time Telegram alerts |
+| Feature                | Details                                                   |
+| ---------------------- | --------------------------------------------------------- |
+| JWT Authentication     | Access token + Refresh token rotation                     |
+| Role Authorization     | SuperAdmin, TenantAdmin, Employee                         |
+| Account Lockout        | Configurable max attempts + lockout duration              |
+| Password Policy        | Complexity rules enforced via FluentValidation            |
+| Rate Limiting          | Sliding window on auth endpoints, fixed window global     |
+| CORS                   | Configurable per environment                              |
+| Audit Logging          | All mutations logged with masked sensitive data           |
+| Token Revocation       | On password change and account deletion                   |
+| Security Monitoring    | Automated threat detection with real-time Telegram alerts |
+| Resource Authorization | Tenant ownership verified per request via Policy Handler  |
 
 ---
 
