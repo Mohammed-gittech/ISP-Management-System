@@ -5,7 +5,7 @@ namespace ISP.Application.DTOs.Reports
     {
         // معلومات أساسية
         public int PlanId { get; set; } // معرف الباقة
-        public string planName { get; set; } = string.Empty; // اسم الباقة
+        public string PlanName { get; set; } = string.Empty; // اسم الباقة
         public int Speed { get; set; } // مثال: 100 (Mbps) السرعة بالميجابت 
         public decimal Price { get; set; } // السعر الشهري
 
