@@ -251,6 +251,10 @@ namespace ISP.API.Middleware
             if (path.Contains("/subscriptions")) return "Subscription";
             if (path.Contains("/notifications")) return "Notification";
             if (path.Contains("/auditlogs")) return "AuditLog";
+            if (path.Contains("/Payments")) return "Payment";
+            if (path.Contains("/Invoices")) return "Invoice";
+            if (path.Contains("/Reports")) return "Report";
+            if (path.Contains("/security-alerts")) return "Security-Alerts";
 
             return "Unknown";
         }

@@ -375,7 +375,7 @@ namespace ISP.Infrastructure.Services
                 plans.Add(new PlanPopularityDto
                 {
                     PlanId = plan.PlanId,
-                    planName = plan.PlanName,
+                    PlanName = plan.PlanName,
                     Speed = plan.Speed,
                     Price = plan.Price,
                     SubscribersCount = plan.SubscribersCount,
@@ -620,7 +620,7 @@ namespace ISP.Infrastructure.Services
 
             if (topPlan != null)
             {
-                topPlanName = topPlan.planName;
+                topPlanName = topPlan.PlanName;
                 topPlanSubscribers = topPlan.SubscribersCount;
                 topPlanPercentage = topPlan.Percentage;
                 topPlanRevenue = topPlan.MonthlyRevenue;

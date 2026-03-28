@@ -209,8 +209,8 @@ namespace ISP.API.Controllers
             return Ok(new
             {
                 success = true,
-                data = result,
-                message = "الباقات المحذوفة (يمكن استرجاعها)"
+                message = "الباقات المحذوفة (يمكن استرجاعها)",
+                data = result
             });
         }
 
