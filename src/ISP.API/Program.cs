@@ -119,7 +119,7 @@ try
         options.AddPolicy("DevelopmentPolicy", policy =>
         {
             policy
-            .WithOrigins("http://localhost:3000", "http://localhost:8080") // WithOrigins = حدد العناوين المسموح لها
+            .WithOrigins("http://localhost:3000", "http://localhost:8080", "http://localhost:5173") // WithOrigins = حدد العناوين المسموح لها
             .AllowAnyMethod()  // AllowAnyMethod = اسمح لكل HTTP Methods
             .AllowAnyHeader() // AllowAnyHeader = اسمح لكل Headers
             .AllowCredentials(); // AllowCredentials = اسمح بإرسال Authorization Headers
